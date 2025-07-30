@@ -2,6 +2,8 @@
 
 A modern terminal-based file explorer with powerful file sharing capabilities. Navigate your filesystem with ease and instantly share files across your network with a beautiful web interface.
 
+<img width="1650" height="1050" alt="Screenshot 2025-07-30 at 9 34 29 PM" src="https://github.com/user-attachments/assets/5cb6a988-e277-4f58-bbdb-a46e66202854" />
+
 ## ✨ Features
 
 ### 🖥️ Terminal File Explorer
