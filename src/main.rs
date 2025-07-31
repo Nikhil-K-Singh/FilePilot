@@ -5,6 +5,7 @@ mod file_system;
 mod search;
 mod ui;
 mod file_sharing;
+mod config;
 
 use file_system::FileExplorer;
 use search::SearchEngine;

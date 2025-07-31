@@ -9,6 +9,8 @@ use arboard::Clipboard;
 use local_ip_address::local_ip;
 use csv::ReaderBuilder;
 use calamine::{Reader, Xlsx, Xls, open_workbook};
+use serde::{Deserialize, Serialize};
+use crate::config::Config;
 
 // Size limits for different file types
 const MAX_JSON_CLIENT_SIZE: u64 = 5 * 1024 * 1024; // 5MB limit for client-side JSON processing
@@ -17,6 +19,17 @@ const MAX_MARKDOWN_SIZE: u64 = 5 * 1024 * 1024; // 5MB limit for markdown
 const MAX_SPREADSHEET_SIZE: u64 = 10 * 1024 * 1024; // 10MB limit for spreadsheets
 const MAX_CSV_ROWS: usize = 1000; // Maximum rows to display for CSV
 const MAX_EXCEL_ROWS: usize = 1000; // Maximum rows to display for Excel
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct FileShareNotification {
+    pub file_id: String,
+    pub file_name: String,
+    pub file_path: String,
+    pub share_url: String,
+    pub file_size: Option<u64>,
+    pub mime_type: String,
+    pub timestamp: u64,
+}
 
 #[derive(Clone)]
 struct FileInfo {
@@ -29,6 +42,7 @@ pub struct FileShareServer {
     shared_files: Arc<RwLock<HashMap<String, PathBuf>>>,
     server_port: u16,
     is_running: Arc<RwLock<bool>>,
+    config: Config,
 }
 
 impl FileShareServer {
@@ -37,7 +51,35 @@ impl FileShareServer {
             shared_files: Arc::new(RwLock::new(HashMap::new())),
             server_port: 8080, // Default port
             is_running: Arc::new(RwLock::new(false)),
+            config: Config::load_default(),
         }
+    }
+
+    async fn send_notification(&self, notification: FileShareNotification) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if !self.config.notification_enabled {
+            return Ok(());
+        }
+
+        let Some(endpoint) = &self.config.notification_endpoint else {
+            return Ok(());
+        };
+
+        let client = reqwest::Client::builder()
+            .build()?;
+
+        // Try to send the notification - if it fails, we'll return the error
+        // so the UI can display a warning message that will fade away
+        let response = client
+            .post(endpoint)
+            .json(&notification)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(format!("Notification endpoint returned status: {}", response.status()).into());
+        }
+
+        Ok(())
     }
 
     pub async fn start_server(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -374,6 +416,7 @@ impl FileShareServer {
         // Add file to shared files
         let mut shared_files = self.shared_files.write().await;
         shared_files.insert(file_id.clone(), file_path.to_path_buf());
+        drop(shared_files); // Release the lock early
 
         // Get local IP
         let local_ip = local_ip().unwrap_or_else(|_| "127.0.0.1".parse().unwrap());
@@ -386,7 +429,39 @@ impl FileShareServer {
             let _ = clipboard.set_text(&url);
         }
 
-        Ok(url)
+        // Get file metadata for notification
+        let file_size = std::fs::metadata(file_path).ok().map(|m| m.len());
+        let file_name = file_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let mime_type = get_mime_type(file_path).to_string();
+
+        // Create and send notification
+        let notification = FileShareNotification {
+            file_id: file_id.clone(),
+            file_name,
+            file_path: file_path.to_string_lossy().to_string(),
+            share_url: url.clone(),
+            file_size,
+            mime_type,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+
+        // Send notification (non-blocking)
+        let notification_result = self.send_notification(notification).await;
+
+        // Return URL with optional warning about notification failure
+        match notification_result {
+            Ok(()) => Ok(url),
+            Err(e) => {
+                // Return success with a warning message that will fade
+                Ok(format!("{} (Warning: {})", url, e))
+            }
+        }
     }
 
     async fn find_available_port(&mut self) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {

@@ -15,6 +15,7 @@ use ratatui::{
     Frame, Terminal,
 };
 use std::io;
+use std::time::Instant;
 use tokio::time::{sleep, Duration};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -22,6 +23,21 @@ pub enum SearchStrategy {
     Fast,        // Quick search with limited depth and results
     Comprehensive, // Full search with all features
     LocalOnly,   // Search only in current directory files
+}
+
+#[derive(Debug, Clone)]
+pub enum MessageType {
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+pub struct StatusMessage {
+    pub text: String,
+    pub message_type: MessageType,
+    pub timestamp: Instant,
+    pub fade_duration: Duration,
 }
 
 impl SearchStrategy {
@@ -51,7 +67,7 @@ pub struct App {
     pub search_input: String,
     pub search_results: Vec<SearchResult>,
     pub search_list_state: ListState,
-    pub status_message: String,
+    pub status_message: Option<StatusMessage>,
     pub search_strategy: SearchStrategy,
     pub showing_search_results: bool,
 }
@@ -67,12 +83,64 @@ impl App {
             search_input: String::new(),
             search_results: Vec::new(),
             search_list_state: ListState::default(),
-            status_message: "Press '/' to search, 'q' to quit, Enter to navigate".to_string(),
+            status_message: Some(StatusMessage {
+                text: "Press '/' to search, 'q' to quit, Enter to navigate".to_string(),
+                message_type: MessageType::Info,
+                timestamp: Instant::now(),
+                fade_duration: Duration::from_secs(u64::MAX), // Never fade the default message
+            }),
             search_strategy: SearchStrategy::Fast,
             showing_search_results: false,
         };
         app.list_state.select(Some(0));
         app
+    }
+
+    pub fn set_message(&mut self, text: String, message_type: MessageType, fade_duration: Duration) {
+        self.status_message = Some(StatusMessage {
+            text,
+            message_type,
+            timestamp: Instant::now(),
+            fade_duration,
+        });
+    }
+
+    pub fn set_info_message(&mut self, text: String) {
+        self.set_message(text, MessageType::Info, Duration::from_secs(u64::MAX));
+    }
+
+    pub fn set_warning_message(&mut self, text: String) {
+        self.set_message(text, MessageType::Warning, Duration::from_secs(5));
+    }
+
+    pub fn set_error_message(&mut self, text: String) {
+        self.set_message(text, MessageType::Error, Duration::from_secs(8));
+    }
+
+    pub fn update_message_fade(&mut self) {
+        if let Some(msg) = &self.status_message {
+            if msg.timestamp.elapsed() > msg.fade_duration {
+                self.status_message = Some(StatusMessage {
+                    text: "Press '/' to search, 'q' to quit, Enter to navigate".to_string(),
+                    message_type: MessageType::Info,
+                    timestamp: Instant::now(),
+                    fade_duration: Duration::from_secs(u64::MAX),
+                });
+            }
+        }
+    }
+
+    pub fn get_current_message(&self) -> &str {
+        self.status_message.as_ref().map(|m| m.text.as_str()).unwrap_or("")
+    }
+
+    pub fn get_message_style(&self) -> Style {
+        match self.status_message.as_ref().map(|m| &m.message_type) {
+            Some(MessageType::Error) => Style::default().fg(Color::Red),
+            Some(MessageType::Warning) => Style::default().fg(Color::Yellow),
+            Some(MessageType::Info) => Style::default().fg(Color::White),
+            None => Style::default().fg(Color::White),
+        }
     }
 
     pub fn next_item(&mut self) {
@@ -150,13 +218,13 @@ impl App {
                 Ok(results) => {
                     self.search_results = results;
                     self.search_list_state.select(if self.search_results.is_empty() { None } else { Some(0) });
-                    self.status_message = format!("Found {} results ({})", 
+                    self.set_info_message(format!("Found {} results ({})", 
                         self.search_results.len(), 
                         self.search_strategy.description()
-                    );
+                    ));
                 }
                 Err(e) => {
-                    self.status_message = format!("Search error: {}", e);
+                    self.set_error_message(format!("Search error: {}", e));
                 }
             }
         }
@@ -164,12 +232,14 @@ impl App {
 
     pub fn toggle_search_strategy(&mut self) {
         self.search_strategy = self.search_strategy.next();
-        self.status_message = format!("Search strategy: {}", self.search_strategy.description());
+        self.set_info_message(format!("Search strategy: {}", self.search_strategy.description()));
         
         // Re-run search if we're in search mode and have input
         if self.search_mode && !self.search_input.is_empty() {
             // We'll trigger a search on the next event loop iteration
-            self.status_message.push_str(" - type to search again");
+            if let Some(ref mut msg) = self.status_message {
+                msg.text.push_str(" - type to search again");
+            }
         }
     }
 
@@ -205,8 +275,8 @@ impl App {
         self.showing_search_results = false;
         self.search_input.clear();
         self.search_results.clear();
-        self.status_message = format!("Search mode: {} - Type to search, F2 to toggle strategy, ESC to exit, Enter to keep results", 
-            self.search_strategy.description());
+        self.set_info_message(format!("Search mode: {} - Type to search, F2 to toggle strategy, ESC to exit, Enter to keep results", 
+            self.search_strategy.description()));
     }
 
     pub fn exit_search_mode(&mut self) {
@@ -214,14 +284,14 @@ impl App {
             // Keep search results and switch to showing them
             self.search_mode = false;
             self.showing_search_results = true;
-            self.status_message = format!("Search results ({} items) - Navigate with ↑↓, Enter to open, '/' to search again", 
-                self.search_results.len());
+            self.set_info_message(format!("Search results ({} items) - Navigate with ↑↓, Enter to open, '/' to search again", 
+                self.search_results.len()));
         } else {
             // No results, clear everything
             self.search_mode = false;
             self.showing_search_results = false;
             self.search_input.clear();
-            self.status_message = "Press '/' to search, 'q' to quit, Enter to navigate".to_string();
+            self.set_info_message("Press '/' to search, 'q' to quit, Enter to navigate".to_string());
         }
     }
 
@@ -232,7 +302,7 @@ impl App {
         self.search_results.clear();
         self.search_list_state = ListState::default();
         self.list_state.select(Some(0));
-        self.status_message = "Press '/' to search, 'q' to quit, Enter to navigate".to_string();
+        self.set_info_message("Press '/' to search, 'q' to quit, Enter to navigate".to_string());
     }
 
     pub fn open_selected_file(&mut self) -> Result<String, String> {
@@ -339,6 +409,9 @@ async fn run_app<B: Backend>(
     app: &mut App,
 ) -> io::Result<()> {
     loop {
+        // Update message fade status
+        app.update_message_fade();
+        
         terminal.draw(|f| ui(f, app))?;
 
         if event::poll(Duration::from_millis(100))? {
@@ -391,20 +464,26 @@ async fn run_app<B: Backend>(
                             }
                             KeyCode::Char('o') | KeyCode::Char('O') => {
                                 match app.open_selected_file() {
-                                    Ok(msg) => app.status_message = msg,
-                                    Err(err) => app.status_message = err,
+                                    Ok(msg) => app.set_info_message(msg),
+                                    Err(err) => app.set_error_message(err),
                                 }
                             }
                             KeyCode::Char('r') | KeyCode::Char('R') => {
                                 match app.reveal_selected_in_file_manager() {
-                                    Ok(msg) => app.status_message = msg,
-                                    Err(err) => app.status_message = err,
+                                    Ok(msg) => app.set_info_message(msg),
+                                    Err(err) => app.set_error_message(err),
                                 }
                             }
                             KeyCode::Char('s') | KeyCode::Char('S') => {
                                 match app.share_selected_file().await {
-                                    Ok(msg) => app.status_message = msg,
-                                    Err(err) => app.status_message = err,
+                                    Ok(msg) => {
+                                        if msg.contains("Warning:") {
+                                            app.set_warning_message(msg);
+                                        } else {
+                                            app.set_info_message(msg);
+                                        }
+                                    },
+                                    Err(err) => app.set_error_message(err),
                                 }
                             }
                             KeyCode::Esc => {
@@ -432,20 +511,26 @@ async fn run_app<B: Backend>(
                             }
                             KeyCode::Char('o') | KeyCode::Char('O') => {
                                 match app.open_selected_file() {
-                                    Ok(msg) => app.status_message = msg,
-                                    Err(err) => app.status_message = err,
+                                    Ok(msg) => app.set_info_message(msg),
+                                    Err(err) => app.set_error_message(err),
                                 }
                             }
                             KeyCode::Char('r') | KeyCode::Char('R') => {
                                 match app.reveal_selected_in_file_manager() {
-                                    Ok(msg) => app.status_message = msg,
-                                    Err(err) => app.status_message = err,
+                                    Ok(msg) => app.set_info_message(msg),
+                                    Err(err) => app.set_error_message(err),
                                 }
                             }
                             KeyCode::Char('s') | KeyCode::Char('S') => {
                                 match app.share_selected_file().await {
-                                    Ok(msg) => app.status_message = msg,
-                                    Err(err) => app.status_message = err,
+                                    Ok(msg) => {
+                                        if msg.contains("Warning:") {
+                                            app.set_warning_message(msg);
+                                        } else {
+                                            app.set_info_message(msg);
+                                        }
+                                    },
+                                    Err(err) => app.set_error_message(err),
                                 }
                             }
                             KeyCode::F(2) => {
@@ -616,7 +701,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     
     let footer = Paragraph::new(vec![
         Line::from(text),
-        Line::from(app.status_message.as_str()),
+        Line::from(Span::styled(app.get_current_message(), app.get_message_style())),
     ])
     .block(Block::default().borders(Borders::ALL).title("Controls"));
     
