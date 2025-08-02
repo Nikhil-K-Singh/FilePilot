@@ -4,6 +4,10 @@ A modern terminal-based file explorer with powerful file sharing capabilities. N
 
 <img width="1650" height="1050" alt="Screenshot 2025-07-30 at 9 34 29 PM" src="https://github.com/user-attachments/assets/5cb6a988-e277-4f58-bbdb-a46e66202854" />
 
+<img width="1650" height="1050" alt="Screenshot 2025-08-02 at 11 52 09 PM" src="https://github.com/user-attachments/assets/839bd499-2994-40bb-9e9a-e4fef9b779f6" />
+
+
+
 ## ✨ Features
 
 ### 🖥️ Terminal File Explorer
