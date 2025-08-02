@@ -1,6 +1,6 @@
 # 🗂️ FilePilot
 
-A modern terminal-based file explorer with powerful file sharing capabilities. Navigate your filesystem with ease and instantly share files across your network with a beautiful web interface.
+A modern terminal-based file explorer with powerful file sharing capabilities. Navigate your filesystem with ease and instantly share files across your network with a beautiful web interface featuring QR codes for mobile access.
 
 <img width="1650" height="1050" alt="Screenshot 2025-07-30 at 9 34 29 PM" src="https://github.com/user-attachments/assets/5cb6a988-e277-4f58-bbdb-a46e66202854" />
 
@@ -15,6 +15,7 @@ A modern terminal-based file explorer with powerful file sharing capabilities. N
 ### 🌐 Instant File Sharing
 - **One-Key Sharing** - Press 'S' to instantly share any file
 - **Auto URL Copy** - Sharing URL automatically copied to clipboard
+- **QR Code Generation** - Scannable QR codes for mobile sharing
 - **Web Viewer** - Professional dark-themed web interface for file viewing
 - **Cross Platform** - Share files between any devices on your network
 
@@ -34,6 +35,7 @@ A modern terminal-based file explorer with powerful file sharing capabilities. N
 - **Markdown Rendering** - GitHub-style markdown with proper styling
 - **Jupyter Notebooks** - Full notebook rendering with code cells and outputs
 - **Spreadsheet Tables** - Professional table display with sorting and filtering
+- **QR Code Integration** - Every shared file includes a QR code for mobile access
 - **Dark Theme** - Consistent dark theme across all file viewers
 
 ## 🚀 Installation
@@ -78,7 +80,7 @@ rustup target add armv7-unknown-linux-gnueabihf
 
 #### 2. Build for Specific Platforms
 
-##### 🍎 macOS
+#####  macOS
 ```bash
 # Intel Mac
 cargo build --release --target x86_64-apple-darwin
@@ -93,7 +95,7 @@ lipo -create -output target/filepilot-universal \
     target/aarch64-apple-darwin/release/filepilot
 ```
 
-##### 🪟 Windows
+##### Windows
 ```bash
 # 64-bit Windows
 cargo build --release --target x86_64-pc-windows-gnu
@@ -230,7 +232,7 @@ cargo deb
 ## 🎮 Usage
 
 ### Terminal Interface
-- **↑/↓ or j/k**: Navigate files
+- **↑/↓**: Navigate files
 - **Enter**: Enter directory or open file
 - **Backspace**: Go to parent directory
 - **S**: Share current file (URL copied to clipboard)
@@ -242,8 +244,9 @@ cargo deb
 1. Navigate to any file using the terminal interface
 2. Press **'S'** to share the file
 3. The sharing URL is automatically copied to your clipboard
-4. Share the URL with anyone on your network
-5. Files are viewed directly in the browser with proper formatting
+4. **📱 QR Code appears** - Scan with your phone for instant mobile access
+5. Share the URL with anyone on your network
+6. Files are viewed directly in the browser with proper formatting
 
 ### Web Interface Features
 - **Direct viewing** of 25+ file types
@@ -253,6 +256,7 @@ cargo deb
 - **Video/audio streaming** with full browser controls
 - **Spreadsheet tables** with sorting and filtering
 - **Jupyter notebook** rendering with cell outputs
+- **📱 QR code display** for easy mobile sharing
 - **Download options** always available
 
 ## 🛠️ Development
@@ -265,7 +269,8 @@ FilePilot/
 │   ├── ui.rs                # Terminal UI components
 │   ├── file_sharing.rs      # Web server and file serving
 │   ├── file_system.rs       # File system operations
-│   └── search.rs            # File search functionality
+│   ├── search.rs            # File search functionality
+│   └── config.json          # Configuration file
 ├── Cargo.toml               # Dependencies and metadata
 └── README.md                # This file
 ```
@@ -297,6 +302,9 @@ cargo check
 - **regex** - Pattern matching for text processing
 - **arboard** - Clipboard integration
 - **local-ip-address** - Network IP detection
+- **qrcode** - QR code generation for mobile sharing
+- **image** - Image processing for QR codes
+- **base64** - Base64 encoding for QR code embedding
 
 ## 🤝 Contributing
 
@@ -314,12 +322,12 @@ This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) 
 
 | Platform | Architecture | Status | Binary Name |
 |----------|-------------|--------|-------------|
-| 🍎 macOS | Intel (x64) | ✅ Supported | `filepilot-macos-intel` |
-| 🍎 macOS | Apple Silicon (ARM64) | ✅ Supported | `filepilot-macos-arm64` |
-| 🪟 Windows | x64 | ✅ Supported | `filepilot-windows.exe` |
-| 🐧 Linux | x64 | ✅ Supported | `filepilot-linux` |
-| 🐧 Linux | ARM64 | ✅ Supported | `filepilot-linux-arm64` |
-| 🐧 Linux | ARMv7 | ✅ Supported | `filepilot-linux-armv7` |
+| macOS | Intel (x64) | ✅ Supported | `filepilot-macos-intel` |
+| macOS | Apple Silicon (ARM64) | ✅ Supported | `filepilot-macos-arm64` |
+| Windows | x64 | ✅ Supported | `filepilot-windows.exe` |
+| Linux | x64 | ✅ Supported | `filepilot-linux` |
+| Linux | ARM64 | ✅ Supported | `filepilot-linux-arm64` |
+| Linux | ARMv7 | ✅ Supported | `filepilot-linux-armv7` |
 
 ## 🚀 Performance
 

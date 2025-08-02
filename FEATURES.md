@@ -21,7 +21,7 @@ FilePilot bridges the gap between local file management and global file sharing,
 ### 🛠️ **File Operations**
 ```bash
 # Key Controls
-↑/↓ or j/k     # Navigate files and directories
+↑/↓             # Navigate files and directories
 Enter           # Open directories or files
 Backspace       # Go to parent directory
 S               # Share file instantly (magic happens here!)
@@ -39,8 +39,17 @@ Press **`S`** on any file and watch the magic happen:
 1. **⚡ Instant Server** - Web server starts automatically
 2. **🔗 URL Generation** - Unique sharing URL created instantly
 3. **📋 Auto-Clipboard** - URL copied to clipboard automatically
-4. **🌍 Network Access** - Share with anyone on your network
-5. **🎨 Professional Viewer** - Files open in beautiful web interface
+4. **📱 QR Code Generation** - Scannable QR code for mobile sharing
+5. **🌍 Network Access** - Share with anyone on your network
+6. **🎨 Professional Viewer** - Files open in beautiful web interface
+
+### 📱 **QR Code Magic**
+Every shared file includes a **QR code** for instant mobile access:
+- **📸 Scan & Go** - Point your phone camera at the QR code
+- **🔗 Direct Access** - QR code contains the full sharing URL
+- **🎨 Clean Display** - Minimalist QR code presentation
+- **📱 Mobile Optimized** - Perfect for sharing across devices
+- **⚡ Instant Generation** - QR codes created in real-time
 
 ### 🔒 **Smart & Secure**
 - **🆔 Unique URLs** - Each shared file gets a UUID-based URL
@@ -62,14 +71,6 @@ Press **`S`** on any file and watch the magic happen:
 - **📱 Responsive** - Works on mobile devices
 - **⬇️ Download Option** - Always available as backup
 
-```html
-🎬 Video Player Features:
-├── 🔄 Streaming support for large files
-├── ⏯️  Full playback controls
-├── 📊 Progress bar with seek
-├── 🔊 Volume control
-└── 📱 Mobile-friendly interface
-```
 
 ### 🎵 **Audio Files** - *High-Quality Playback*
 **Supported:** MP3, WAV, M4A, AAC, OGA, OGG, FLAC
@@ -205,18 +206,13 @@ File Size Intelligence:
 ### 💻 **Platform Support**
 | Platform | Architecture | Status | Performance |
 |----------|-------------|--------|-------------|
-| 🍎 **macOS** | Intel x64 | ✅ Native | ⚡ Excellent |
-| 🍎 **macOS** | Apple Silicon | ✅ Native | ⚡ Excellent |
-| 🪟 **Windows** | x64 | ✅ Native | ⚡ Excellent |
-| 🐧 **Linux** | x64 | ✅ Native | ⚡ Excellent |
-| 🐧 **Linux** | ARM64 | ✅ Native | ⚡ Excellent |
-| 🔧 **Raspberry Pi** | ARMv7 | ✅ Native | ⚡ Good |
+|  **macOS** | Intel x64 | ✅ Native | ⚡ Excellent |
+|  **macOS** | Apple Silicon | ✅ Native | ⚡ Excellent |
+|  **Windows** | x64 | ✅ Native | ⚡ Excellent |
+|  **Linux** | x64 | ✅ Native | ⚡ Excellent |
+|  **Linux** | ARM64 | ✅ Native | ⚡ Excellent |
+|  **Raspberry Pi** | ARMv7 | ✅ Native | ⚡ Good |
 
-### 🏗️ **Easy Distribution**
-- **📦 Single Binary** - No dependencies to install
-- **🔄 Cross-Compilation** - Build for any platform from any platform
-- **📋 Automated Scripts** - One-command build for all platforms
-- **🎁 Package Formats** - .app, .deb, .msi support
 
 ---
 
@@ -228,9 +224,16 @@ flowchart LR
     A[📂 Navigate Files] --> B[👆 Press 'S']
     B --> C[🔗 URL Generated]
     C --> D[📋 Auto-Copied]
-    D --> E[🌐 Share Anywhere]
-    E --> F[🎨 Beautiful Viewer]
+    D --> E[📱 QR Code Created]
+    E --> F[🌐 Share Anywhere]
+    F --> G[🎨 Beautiful Viewer]
 ```
+
+### 📱 **Mobile-First Sharing**
+- **📸 QR Code Scanning** - Instant mobile access via camera
+- **🔗 URL Clipboard** - Traditional sharing via copy-paste
+- **📱 Cross-Device** - Seamless desktop-to-mobile workflow
+- **⚡ Real-Time** - QR codes generated instantly for every file
 
 ### ⚡ **Lightning Fast**
 - **🏃 Startup Time:** < 100ms
@@ -265,6 +268,7 @@ flowchart LR
 - **🎭 Prism.js** - Professional syntax highlighting
 - **📊 Calamine** - Excel file processing
 - **📝 CSV** - Efficient CSV parsing
+- **📱 QR Code** - Real-time QR code generation for mobile sharing
 
 ### 🔒 **Security Features**
 - **🏠 Local Network Only** - No external exposure

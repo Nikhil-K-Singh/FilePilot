@@ -11,6 +11,9 @@ use csv::ReaderBuilder;
 use calamine::{Reader, Xlsx, Xls, open_workbook};
 use serde::{Deserialize, Serialize};
 use crate::config::Config;
+use qrcode::{QrCode, EcLevel};
+use image::{Luma};
+use base64::{Engine as _, engine::general_purpose};
 
 // Size limits for different file types
 const MAX_JSON_CLIENT_SIZE: u64 = 5 * 1024 * 1024; // 5MB limit for client-side JSON processing
@@ -104,6 +107,7 @@ impl FileShareServer {
             .and(warp::path::param::<String>())
             .and_then(move |file_id: String| {
                 let shared_files = shared_files.clone();
+                let server_port = port;
                 async move {
                     let files = shared_files.read().await;
                     if let Some(file_path) = files.get(&file_id) {
@@ -118,7 +122,9 @@ impl FileShareServer {
                                 path: file_path.to_string_lossy().to_string(),
                             };
                             // Generate HTML viewer page for this file
-                            let html = create_file_viewer_page(&file_info);
+                            let local_ip = local_ip().unwrap_or_else(|_| "127.0.0.1".parse().unwrap());
+                            let share_url = format!("http://{}:{}/file/{}", local_ip, server_port, file_id);
+                            let html = create_file_viewer_page(&file_info, &share_url);
                             Ok(warp::reply::html(html))
                         } else {
                             Err(warp::reject::not_found())
@@ -509,6 +515,36 @@ fn should_display_inline(path: &Path) -> bool {
     }
 }
 
+fn generate_qr_code_base64(url: &str) -> Result<String, Box<dyn std::error::Error>> {
+    // Generate QR code
+    let code = QrCode::with_error_correction_level(url, EcLevel::M)?;
+    
+    // Convert to image with some padding
+    let image = code.render::<Luma<u8>>()
+        .min_dimensions(200, 200) // Minimum size for readability
+        .max_dimensions(400, 400) // Maximum size to keep it reasonable
+        .build();
+    
+    // Convert to PNG bytes
+    let mut png_bytes = Vec::new();
+    {
+        use image::codecs::png::PngEncoder;
+        use image::ImageEncoder;
+        
+        let encoder = PngEncoder::new(&mut png_bytes);
+        encoder.write_image(
+            image.as_raw(),
+            image.width(),
+            image.height(),
+            image::ExtendedColorType::L8,
+        )?;
+    }
+    
+    // Encode to base64
+    let base64_string = general_purpose::STANDARD.encode(&png_bytes);
+    Ok(base64_string)
+}
+
 fn get_mime_type(path: &Path) -> &'static str {
     let extension = path.extension()
         .and_then(|ext| ext.to_str())
@@ -723,7 +759,7 @@ fn parse_excel_to_html(file_path: &Path, max_rows: usize) -> Result<String, Box<
     Ok(html)
 }
 
-fn create_file_viewer_page(file_info: &FileInfo) -> String {
+fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
     let extension = Path::new(&file_info.name)
         .extension()
         .and_then(|ext| ext.to_str())
@@ -1909,7 +1945,11 @@ fn create_file_viewer_page(file_info: &FileInfo) -> String {
             {}
         </div>
         <div style="text-align: center; margin-top: 20px;">
-            <p style="color: #8b949e;"><strong>File Path:</strong> {}</p>
+            <div style="margin: 20px auto; max-width: 300px; display: flex; justify-content: center;">
+                <div style="background: white; padding: 10px; border-radius: 8px;">
+                    <img src="data:image/png;base64,{}" alt="QR Code" style="display: block;" />
+                </div>
+            </div>
         </div>
     </div>
     <!-- Prism.js JavaScript for syntax highlighting -->
@@ -1917,7 +1957,8 @@ fn create_file_viewer_page(file_info: &FileInfo) -> String {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
 </body>
 </html>"#,
-        file_info.name, file_info.name, viewer_content, file_info.path
+        file_info.name, file_info.name, viewer_content,
+        generate_qr_code_base64(share_url).unwrap_or_else(|_| "".to_string())
     )
 }
 
