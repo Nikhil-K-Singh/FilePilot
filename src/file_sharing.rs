@@ -152,7 +152,7 @@ impl FileShareServer {
                                 .map_err(|_| warp::reject::not_found())?;
                             let file_size = metadata.len();
                             
-                            // Handle range requests for video streaming
+                            // Handle range requests for all file types
                             if let Some(range) = range_header {
                                 if let Some((start, end)) = parse_range(&range, file_size) {
                                     let mut file = tokio::fs::File::open(file_path).await
@@ -210,31 +210,75 @@ impl FileShareServer {
                 }
             });
 
-        // Download route - forces file download with proper filename
+        // Download route - forces file download with proper filename and range request support
         let download_route = warp::path("download")
             .and(warp::path::param::<String>())
-            .and_then(move |file_id: String| {
+            .and(warp::header::optional::<String>("range"))
+            .and_then(move |file_id: String, range_header: Option<String>| {
                 let shared_files = shared_files_for_download.clone();
                 async move {
                     let files = shared_files.read().await;
                     if let Some(file_path) = files.get(&file_id) {
                         if file_path.exists() && file_path.is_file() {
+                            let mime_type = get_mime_type(file_path);
+                            
+                            // Get file metadata
+                            let metadata = tokio::fs::metadata(file_path).await
+                                .map_err(|_| warp::reject::not_found())?;
+                            let file_size = metadata.len();
+                            
+                            let filename = file_path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("download");
+                            
+                            // Handle range requests for ALL file types
+                            if let Some(range) = range_header {
+                                if let Some((start, end)) = parse_range(&range, file_size) {
+                                    let mut file = tokio::fs::File::open(file_path).await
+                                        .map_err(|_| warp::reject::not_found())?;
+                                    
+                                    // Seek to start position
+                                    use tokio::io::AsyncSeekExt;
+                                    file.seek(std::io::SeekFrom::Start(start)).await
+                                        .map_err(|_| warp::reject::not_found())?;
+                                    
+                                    // Take only the requested range
+                                    let content_length = end - start + 1;
+                                    let limited_file = tokio::io::AsyncReadExt::take(file, content_length);
+                                    let stream = tokio_util::io::ReaderStream::new(limited_file);
+                                    let body = warp::hyper::Body::wrap_stream(stream);
+                                    
+                                    let response = warp::http::Response::builder()
+                                        .status(206) // Partial Content
+                                        .header("Content-Type", mime_type)
+                                        .header("Content-Length", content_length.to_string())
+                                        .header("Content-Range", format!("bytes {}-{}/{}", start, end, file_size))
+                                        .header("Accept-Ranges", "bytes")
+                                        .header("Content-Disposition", format!("attachment; filename=\"{}\"", filename))
+                                        .header("Cache-Control", "public, max-age=3600")
+                                        .header("Access-Control-Allow-Origin", "*")
+                                        .body(body)
+                                        .map_err(|_| warp::reject::not_found())?;
+                                    
+                                    return Ok(response);
+                                }
+                            }
+                            
+                            // Serve full file if no range request
                             let file = tokio::fs::File::open(file_path).await
                                 .map_err(|_| warp::reject::not_found())?;
                             
                             let stream = tokio_util::io::ReaderStream::new(file);
                             let body = warp::hyper::Body::wrap_stream(stream);
                             
-                            let filename = file_path.file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("download");
-                            
-                            let mime_type = get_mime_type(file_path);
-                            
                             // Force download with proper filename
                             let response = warp::http::Response::builder()
                                 .header("Content-Type", mime_type)
+                                .header("Content-Length", file_size.to_string())
                                 .header("Content-Disposition", format!("attachment; filename=\"{}\"", filename))
+                                .header("Accept-Ranges", "bytes")
+                                .header("Cache-Control", "public, max-age=3600")
+                                .header("Access-Control-Allow-Origin", "*")
                                 .body(body)
                                 .map_err(|_| warp::reject::not_found())?;
                             
