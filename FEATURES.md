@@ -80,6 +80,7 @@ Every shared file includes a **QR code** for instant mobile access:
 - **🎚️ Full Audio Controls** - Play, pause, seek, volume
 - **📊 Progress Visualization** - Time tracking and seeking
 - **🔄 Loop & Repeat** - Standard browser audio features
+- **⚡ HTTP Range Requests** - Efficient streaming with seek support
 
 ### 🖼️ **Images** - *Crystal Clear Display*
 **Supported:** JPG, JPEG, PNG, GIF, SVG, WebP, BMP, ICO
@@ -190,6 +191,21 @@ Carol,DevOps,Rust,7 years
 - **🎯 Efficient Rendering** - Only loads what's needed
 - **💾 Memory Management** - Handles large files without crashes
 
+### 🌐 **Universal Range Request Support**
+FilePilot supports **HTTP range requests for ALL file types**, enabling:
+- **⚡ Partial File Downloads** - Download only needed portions
+- **🎥 Media Streaming** - Smooth video/audio seeking without full download
+- **📁 Large File Handling** - Efficient access to specific file sections
+- **💾 Bandwidth Optimization** - Reduced data usage for large files
+- **🔄 Resume Downloads** - Interrupted downloads can resume
+- **📱 Mobile Efficiency** - Optimized for mobile data usage
+
+**Technical Details:**
+- **206 Partial Content** - Proper HTTP/1.1 range response
+- **Multiple Range Formats** - Supports `bytes=0-1023`, `bytes=1024-`, `bytes=-1024`
+- **Async Streaming** - Non-blocking file serving with tokio
+- **Cache Headers** - Efficient browser caching with Accept-Ranges
+
 ### 🔄 **Smart File Handling**
 ```bash
 File Size Intelligence:
@@ -240,7 +256,7 @@ flowchart LR
 - **💾 Memory Usage:** ~10MB baseline
 - **🔗 Share Speed:** Instant URL generation
 - **📁 File Loading:** Sub-second for most files
-- **🌐 Network:** Efficient streaming with range requests
+- **🌐 Network:** Efficient streaming with HTTP range requests for all file types
 
 ### 🎨 **Visual Feedback**
 - **✅ Success Indicators** - Clear feedback for all actions
