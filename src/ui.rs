@@ -1,6 +1,7 @@
 use crate::file_system::{FileExplorer, FileInfo};
 use crate::search::{SearchEngine, SearchResult};
 use crate::file_sharing::FileShareServer;
+use crate::config::Config;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -62,6 +63,7 @@ pub struct App {
     pub explorer: FileExplorer,
     pub search_engine: SearchEngine,
     pub file_share_server: FileShareServer,
+    pub config: Config,
     pub list_state: ListState,
     pub search_mode: bool,
     pub search_input: String,
@@ -73,11 +75,12 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(explorer: FileExplorer, search_engine: SearchEngine) -> App {
+    pub fn new(explorer: FileExplorer, search_engine: SearchEngine, config: Config) -> App {
         let mut app = App {
             explorer,
             search_engine,
             file_share_server: FileShareServer::new(),
+            config,
             list_state: ListState::default(),
             search_mode: false,
             search_input: String::new(),
@@ -201,6 +204,12 @@ impl App {
 
     pub async fn perform_search(&mut self) {
         if !self.search_input.is_empty() {
+            // Show searching indicator
+            self.set_info_message(format!("Searching for '{}' in {}...", 
+                self.search_input,
+                self.explorer.current_path().display()
+            ));
+
             let result = match self.search_strategy {
                 SearchStrategy::Fast => {
                     self.search_engine.search_fast(self.explorer.current_path(), &self.search_input, 100).await
@@ -218,10 +227,17 @@ impl App {
                 Ok(results) => {
                     self.search_results = results;
                     self.search_list_state.select(if self.search_results.is_empty() { None } else { Some(0) });
-                    self.set_info_message(format!("Found {} results ({})", 
-                        self.search_results.len(), 
-                        self.search_strategy.description()
-                    ));
+                    if self.search_results.is_empty() {
+                        self.set_warning_message(format!("No results found for '{}' ({})", 
+                            self.search_input,
+                            self.search_strategy.description()
+                        ));
+                    } else {
+                        self.set_info_message(format!("Found {} results ({})", 
+                            self.search_results.len(), 
+                            self.search_strategy.description()
+                        ));
+                    }
                 }
                 Err(e) => {
                     self.set_error_message(format!("Search error: {}", e));
@@ -375,6 +391,7 @@ impl App {
 pub async fn run_ui(
     explorer: FileExplorer,
     search_engine: SearchEngine,
+    config: Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Setup terminal
     enable_raw_mode()?;
@@ -384,7 +401,7 @@ pub async fn run_ui(
     let mut terminal = Terminal::new(backend)?;
 
     // Create app
-    let mut app = App::new(explorer, search_engine);
+    let mut app = App::new(explorer, search_engine, config);
 
     let res = run_app(&mut terminal, &mut app).await;
 
@@ -419,132 +436,125 @@ async fn run_app<B: Backend>(
                 if key.kind == KeyEventKind::Press {
                     // Handle search mode keys
                     if app.search_mode {
-                        match key.code {
-                            KeyCode::Esc => {
-                                app.exit_search_mode();
-                            }
-                            KeyCode::Enter => {
-                                app.exit_search_mode();
-                            }
-                            KeyCode::F(2) => {
-                                app.toggle_search_strategy();
-                                // Re-run search if we have input
-                                if !app.search_input.is_empty() {
-                                    sleep(Duration::from_millis(50)).await;
-                                    app.perform_search().await;
-                                }
-                            }
-                            KeyCode::Backspace => {
-                                app.search_input.pop();
-                                if !app.search_input.is_empty() {
-                                    app.perform_search().await;
-                                } else {
-                                    app.search_results.clear();
-                                }
-                            }
-                            KeyCode::Up => app.previous_item(),
-                            KeyCode::Down => app.next_item(),
-                            KeyCode::Tab => {
-                                app.navigate_to_selected().ok();
-                            }
-                            KeyCode::Char(c) => {
-                                app.search_input.push(c);
-                                // Shorter delay for more responsive search
-                                sleep(Duration::from_millis(100)).await;
+                        let key_bindings = &app.config.key_bindings;
+                        if key_bindings.matches_key(&key_bindings.search_mode.exit_search, &key.code) {
+                            app.exit_search_mode();
+                        } else if key_bindings.matches_key(&key_bindings.search_mode.exit_to_results, &key.code) {
+                            app.exit_search_mode();
+                        } else if key_bindings.matches_key(&key_bindings.search_mode.toggle_strategy, &key.code) {
+                            app.toggle_search_strategy();
+                            // Re-run search if we have input
+                            if !app.search_input.is_empty() {
+                                sleep(Duration::from_millis(50)).await;
                                 app.perform_search().await;
                             }
-                            _ => {}
+                        } else if key_bindings.matches_key(&key_bindings.search_mode.backspace, &key.code) {
+                            app.search_input.pop();
+                            if !app.search_input.is_empty() {
+                                app.perform_search().await;
+                            } else {
+                                app.search_results.clear();
+                            }
+                        } else if key_bindings.matches_key(&key_bindings.navigation.up, &key.code) {
+                            app.previous_item();
+                        } else if key_bindings.matches_key(&key_bindings.navigation.down, &key.code) {
+                            app.next_item();
+                        } else if key_bindings.matches_key(&key_bindings.search_mode.navigate_tab, &key.code) {
+                            app.navigate_to_selected().ok();
+                        } else {
+                            match key.code {
+                                KeyCode::Char(c) => {
+                                    app.search_input.push(c);
+                                    // Shorter delay for more responsive search
+                                    sleep(Duration::from_millis(100)).await;
+                                    app.perform_search().await;
+                                }
+                                _ => {}
+                            }
                         }
                     } else if app.showing_search_results {
                         // Handle search results viewing mode keys
-                        match key.code {
-                            KeyCode::Char('q') => return Ok(()),
-                            KeyCode::Char('/') => {
-                                app.enter_search_mode();
+                        let key_bindings = &app.config.key_bindings;
+                        if key_bindings.matches_key(&key_bindings.actions.quit, &key.code) {
+                            // Properly shutdown the file sharing server
+                            let _ = app.file_share_server.shutdown().await;
+                            return Ok(());
+                        } else if key_bindings.matches_key(&key_bindings.actions.search, &key.code) {
+                            app.enter_search_mode();
+                        } else if key_bindings.matches_key(&key_bindings.actions.open, &key.code) {
+                            match app.open_selected_file() {
+                                Ok(msg) => app.set_info_message(msg),
+                                Err(err) => app.set_error_message(err),
                             }
-                            KeyCode::Char('o') | KeyCode::Char('O') => {
-                                match app.open_selected_file() {
-                                    Ok(msg) => app.set_info_message(msg),
-                                    Err(err) => app.set_error_message(err),
-                                }
+                        } else if key_bindings.matches_key(&key_bindings.actions.reveal, &key.code) {
+                            match app.reveal_selected_in_file_manager() {
+                                Ok(msg) => app.set_info_message(msg),
+                                Err(err) => app.set_error_message(err),
                             }
-                            KeyCode::Char('r') | KeyCode::Char('R') => {
-                                match app.reveal_selected_in_file_manager() {
-                                    Ok(msg) => app.set_info_message(msg),
-                                    Err(err) => app.set_error_message(err),
-                                }
+                        } else if key_bindings.matches_key(&key_bindings.actions.share, &key.code) {
+                            match app.share_selected_file().await {
+                                Ok(msg) => {
+                                    if msg.contains("Warning:") {
+                                        app.set_warning_message(msg);
+                                    } else {
+                                        app.set_info_message(msg);
+                                    }
+                                },
+                                Err(err) => app.set_error_message(err),
                             }
-                            KeyCode::Char('s') | KeyCode::Char('S') => {
-                                match app.share_selected_file().await {
-                                    Ok(msg) => {
-                                        if msg.contains("Warning:") {
-                                            app.set_warning_message(msg);
-                                        } else {
-                                            app.set_info_message(msg);
-                                        }
-                                    },
-                                    Err(err) => app.set_error_message(err),
-                                }
-                            }
-                            KeyCode::Esc => {
-                                app.clear_search_results();
-                            }
-                            KeyCode::F(2) => {
-                                app.toggle_search_strategy();
-                            }
-                            KeyCode::Enter => {
-                                let _ = app.navigate_to_selected();
-                            }
-                            KeyCode::Up => app.previous_item(),
-                            KeyCode::Down => app.next_item(),
-                            KeyCode::Left => {
-                                app.clear_search_results();
-                            }
-                            _ => {}
+                        } else if key_bindings.matches_key(&key_bindings.search_results.back, &key.code) {
+                            app.clear_search_results();
+                        } else if key_bindings.matches_key(&key_bindings.search_mode.toggle_strategy, &key.code) {
+                            app.toggle_search_strategy();
+                        } else if key_bindings.matches_key(&key_bindings.navigation.enter, &key.code) {
+                            let _ = app.navigate_to_selected();
+                        } else if key_bindings.matches_key(&key_bindings.navigation.up, &key.code) {
+                            app.previous_item();
+                        } else if key_bindings.matches_key(&key_bindings.navigation.down, &key.code) {
+                            app.next_item();
+                        } else if key_bindings.matches_key(&key_bindings.navigation.left, &key.code) {
+                            app.clear_search_results();
                         }
                     } else {
                         // Handle normal navigation mode keys
-                        match key.code {
-                            KeyCode::Char('q') => return Ok(()),
-                            KeyCode::Char('/') => {
-                                app.enter_search_mode();
+                        let key_bindings = &app.config.key_bindings;
+                        if key_bindings.matches_key(&key_bindings.actions.quit, &key.code) {
+                            // Properly shutdown the file sharing server
+                            let _ = app.file_share_server.shutdown().await;
+                            return Ok(());
+                        } else if key_bindings.matches_key(&key_bindings.actions.search, &key.code) {
+                            app.enter_search_mode();
+                        } else if key_bindings.matches_key(&key_bindings.actions.open, &key.code) {
+                            match app.open_selected_file() {
+                                Ok(msg) => app.set_info_message(msg),
+                                Err(err) => app.set_error_message(err),
                             }
-                            KeyCode::Char('o') | KeyCode::Char('O') => {
-                                match app.open_selected_file() {
-                                    Ok(msg) => app.set_info_message(msg),
-                                    Err(err) => app.set_error_message(err),
-                                }
+                        } else if key_bindings.matches_key(&key_bindings.actions.reveal, &key.code) {
+                            match app.reveal_selected_in_file_manager() {
+                                Ok(msg) => app.set_info_message(msg),
+                                Err(err) => app.set_error_message(err),
                             }
-                            KeyCode::Char('r') | KeyCode::Char('R') => {
-                                match app.reveal_selected_in_file_manager() {
-                                    Ok(msg) => app.set_info_message(msg),
-                                    Err(err) => app.set_error_message(err),
-                                }
+                        } else if key_bindings.matches_key(&key_bindings.actions.share, &key.code) {
+                            match app.share_selected_file().await {
+                                Ok(msg) => {
+                                    if msg.contains("Warning:") {
+                                        app.set_warning_message(msg);
+                                    } else {
+                                        app.set_info_message(msg);
+                                    }
+                                },
+                                Err(err) => app.set_error_message(err),
                             }
-                            KeyCode::Char('s') | KeyCode::Char('S') => {
-                                match app.share_selected_file().await {
-                                    Ok(msg) => {
-                                        if msg.contains("Warning:") {
-                                            app.set_warning_message(msg);
-                                        } else {
-                                            app.set_info_message(msg);
-                                        }
-                                    },
-                                    Err(err) => app.set_error_message(err),
-                                }
-                            }
-                            KeyCode::F(2) => {
-                                app.toggle_search_strategy();
-                            }
-                            KeyCode::Enter => {
-                                let _ = app.navigate_to_selected();
-                            }
-                            KeyCode::Up => app.previous_item(),
-                            KeyCode::Down => app.next_item(),
-                            KeyCode::Left => {
-                                let _ = app.go_up();
-                            }
-                            _ => {}
+                        } else if key_bindings.matches_key(&key_bindings.search_mode.toggle_strategy, &key.code) {
+                            app.toggle_search_strategy();
+                        } else if key_bindings.matches_key(&key_bindings.navigation.enter, &key.code) {
+                            let _ = app.navigate_to_selected();
+                        } else if key_bindings.matches_key(&key_bindings.navigation.up, &key.code) {
+                            app.previous_item();
+                        } else if key_bindings.matches_key(&key_bindings.navigation.down, &key.code) {
+                            app.next_item();
+                        } else if key_bindings.matches_key(&key_bindings.navigation.left, &key.code) {
+                            let _ = app.go_up();
                         }
                     }
                 }
@@ -691,12 +701,40 @@ fn format_size(size: u64) -> String {
 }
 
 fn render_footer(f: &mut Frame, app: &App, area: Rect) {
+    let kb = &app.config.key_bindings;
     let text = if app.search_mode {
-        "ESC: Exit search | Enter: Exit to results | F2: Toggle strategy | Tab: Navigate | ↑↓: Browse"
+        format!(
+            "{}: Exit search | {}: Exit to results | {}: Toggle strategy | {}: Navigate | {}: Browse",
+            kb.get_key_display(&kb.search_mode.exit_search),
+            kb.get_key_display(&kb.search_mode.exit_to_results),
+            kb.get_key_display(&kb.search_mode.toggle_strategy),
+            kb.get_key_display(&kb.search_mode.navigate_tab),
+            kb.get_key_display(&kb.navigation.up)
+        )
     } else if app.showing_search_results {
-        "q: Quit | /: New search | ESC: Back | ↑↓: Navigate | Enter: Open/Navigate | O: Open | R: Reveal | S: Share"
+        format!(
+            "{}: Quit | {}: New search | {}: Back | {}: Navigate | {}: Open/Navigate | {}: Open | {}: Reveal | {}: Share",
+            kb.get_key_display(&kb.actions.quit),
+            kb.get_key_display(&kb.actions.search),
+            kb.get_key_display(&kb.search_results.back),
+            kb.get_key_display(&kb.navigation.up),
+            kb.get_key_display(&kb.navigation.enter),
+            kb.get_key_display(&kb.actions.open),
+            kb.get_key_display(&kb.actions.reveal),
+            kb.get_key_display(&kb.actions.share)
+        )
     } else {
-        "q: Quit | /: Search | ↑↓: Navigate | Enter: Open/Navigate | ←: Go up | O: Open | R: Reveal | S: Share"
+        format!(
+            "{}: Quit | {}: Search | {}: Navigate | {}: Open/Navigate | {}: Go up | {}: Open | {}: Reveal | {}: Share",
+            kb.get_key_display(&kb.actions.quit),
+            kb.get_key_display(&kb.actions.search),
+            kb.get_key_display(&kb.navigation.up),
+            kb.get_key_display(&kb.navigation.enter),
+            kb.get_key_display(&kb.navigation.left),
+            kb.get_key_display(&kb.actions.open),
+            kb.get_key_display(&kb.actions.reveal),
+            kb.get_key_display(&kb.actions.share)
+        )
     };
     
     let footer = Paragraph::new(vec![

@@ -58,6 +58,20 @@ impl FileShareServer {
         }
     }
 
+    pub async fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut is_running = self.is_running.write().await;
+        *is_running = false;
+        
+        // Clear shared files
+        let mut shared_files = self.shared_files.write().await;
+        shared_files.clear();
+        
+        // Give the server a moment to shut down gracefully
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        
+        Ok(())
+    }
+
     async fn send_notification(&self, notification: FileShareNotification) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if !self.config.notification_enabled {
             return Ok(());
@@ -522,12 +536,50 @@ impl FileShareServer {
                 return Ok(port);
             }
         }
-        Err("No available ports found".into())
+        
+        // If no ports are available, wait a bit and try again (in case previous instances are shutting down)
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        
+        for port in 8080..8090 {
+            if self.is_port_available(port).await {
+                self.server_port = port;
+                return Ok(port);
+            }
+        }
+        
+        Err("No available ports found (8080-8089)".into())
     }
 
     async fn is_port_available(&self, port: u16) -> bool {
-        use std::net::TcpListener;
-        TcpListener::bind(("127.0.0.1", port)).is_ok()
+        use std::net::{TcpListener, SocketAddr};
+        use std::time::Duration;
+        
+        // Try to bind to the port with SO_REUSEADDR equivalent behavior
+        let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+        
+        match TcpListener::bind(addr) {
+            Ok(listener) => {
+                // Successfully bound, port is available
+                drop(listener); // Immediately release the port
+                
+                // Give a small delay to ensure the port is fully released
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                true
+            }
+            Err(_) => {
+                // Port is in use, try to see if it's a recent binding that might be released soon
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                
+                // Try one more time
+                match TcpListener::bind(addr) {
+                    Ok(listener) => {
+                        drop(listener);
+                        true
+                    }
+                    Err(_) => false
+                }
+            }
+        }
     }
 }
 

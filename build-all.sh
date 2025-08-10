@@ -24,10 +24,10 @@ lipo -create -output target/filepilot-universal \
 cp target/filepilot-universal dist/filepilot-macos-universal
 
 # Windows 64-bit
-echo "Building for Windows..."
-brew install mingw-w64
-cargo build --release --target x86_64-pc-windows-gnu
-cp target/x86_64-pc-windows-gnu/release/filepilot.exe dist/filepilot-windows.exe
+# echo "Building for Windows..."
+# brew install mingw-w64
+# cargo build --release --target x86_64-pc-windows-gnu
+# cp target/x86_64-pc-windows-gnu/release/filepilot.exe dist/filepilot-windows.exe
 
 # Linux 64-bit
 # echo "Building for Linux..."

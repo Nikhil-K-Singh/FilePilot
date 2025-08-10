@@ -252,6 +252,15 @@ cargo deb
 5. Share the URL with anyone on your network
 6. Files are viewed directly in the browser with proper formatting
 
+### Search Performance
+- **Fast Search**: Optimized for real-time typing (4-level depth, 10s timeout)
+- **Comprehensive Search**: Deep filesystem search (8-level depth, 30s timeout)  
+- **Local Only**: Search current directory contents only
+- **Smart Filtering**: Respects .gitignore and skips large files automatically
+- **Timeout Protection**: Prevents hanging on large directory trees
+
+⚠️ **Performance Tip**: When running from home directory or root, search may be slower. Use specific project directories for best performance.
+
 ### Web Interface Features
 - **Direct viewing** of 25+ file types
 - **Syntax highlighting** for code files
@@ -262,6 +271,51 @@ cargo deb
 - **Jupyter notebook** rendering with cell outputs
 - **📱 QR code display** for easy mobile sharing
 - **Download options** always available
+
+## ⚙️ Configuration
+
+FilePilot supports **fully customizable key bindings** through `src/config.json`. You can modify any key binding to match your preferred workflow.
+
+### Default Key Bindings
+- **↑/↓ (or k/j)**: Navigate files (vim-style navigation supported)
+- **← (or h)**: Go to parent directory
+- **Enter**: Enter directory or open file
+- **q**: Quit application
+- **/**: Enter search mode
+- **o/O**: Open file with default application
+- **r/R**: Reveal file in file manager
+- **s/S**: Share file via web server
+
+### Custom Key Bindings Example
+```json
+{
+  "key_bindings": {
+    "navigation": {
+      "up": ["Up", "k", "w"],
+      "down": ["Down", "j", "s"],
+      "left": ["Left", "h", "a"],
+      "enter": ["Enter", "e"]
+    },
+    "actions": {
+      "quit": ["q", "x"],
+      "search": ["/", "f"],
+      "open": ["o", "Space"],
+      "reveal": ["r", "v"],
+      "share": ["s", "u"]
+    }
+  }
+}
+```
+
+### Features
+- **Multiple key bindings** per action (e.g., both arrow keys and vim keys)
+- **Vim-style navigation** (hjkl) included by default
+- **Gaming-style WASD** support possible
+- **Function keys** (F1-F12) supported
+- **Custom character keys** for any action
+- **Live configuration** - changes take effect on restart
+
+📖 **Full Configuration Guide**: See [CONFIGURATION.md](CONFIGURATION.md) for detailed setup instructions and examples.
 
 ## 🛠️ Development
 
