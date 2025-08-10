@@ -47,9 +47,9 @@ impl Default for KeyBindings {
     fn default() -> Self {
         Self {
             navigation: NavigationKeys {
-                up: vec!["Up".to_string(), "k".to_string()],
-                down: vec!["Down".to_string(), "j".to_string()],
-                left: vec!["Left".to_string(), "h".to_string()],
+                up: vec!["Up".to_string()],
+                down: vec!["Down".to_string()],
+                left: vec!["Left".to_string()],
                 enter: vec!["Right".to_string()],
             },
             actions: ActionKeys {
