@@ -27,6 +27,9 @@ pub struct ActionKeys {
     pub open: Vec<String>,
     pub reveal: Vec<String>,
     pub share: Vec<String>,
+    pub cut: Vec<String>,
+    pub copy: Vec<String>,
+    pub paste: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +61,9 @@ impl Default for KeyBindings {
                 open: vec!["o".to_string(), "O".to_string()],
                 reveal: vec!["r".to_string(), "R".to_string()],
                 share: vec!["s".to_string(), "S".to_string()],
+                cut: vec!["x".to_string(), "X".to_string()],
+                copy: vec!["c".to_string(), "C".to_string()],
+                paste: vec!["v".to_string(), "V".to_string()],
             },
             search_mode: SearchModeKeys {
                 exit_search: vec!["Esc".to_string()],
@@ -118,10 +124,28 @@ impl KeyBindings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileShareSettings {
+    pub server_port: u16,
+    pub port_range_start: u16,
+    pub port_range_end: u16,
+}
+
+impl Default for FileShareSettings {
+    fn default() -> Self {
+        Self {
+            server_port: 8080,
+            port_range_start: 8080,
+            port_range_end: 8090,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub notification_endpoint: Option<String>,
     pub notification_enabled: bool,
     pub key_bindings: KeyBindings,
+    pub file_sharing: FileShareSettings,
 }
 
 impl Default for Config {
@@ -130,6 +154,7 @@ impl Default for Config {
             notification_endpoint: None,
             notification_enabled: false,
             key_bindings: KeyBindings::default(),
+            file_sharing: FileShareSettings::default(),
         }
     }
 }

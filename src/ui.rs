@@ -17,6 +17,7 @@ use ratatui::{
 };
 use std::io;
 use std::time::Instant;
+use std::path::PathBuf;
 use tokio::time::{sleep, Duration};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +25,18 @@ pub enum SearchStrategy {
     Fast,        // Quick search with limited depth and results
     Comprehensive, // Full search with all features
     LocalOnly,   // Search only in current directory files
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClipboardOperation {
+    Cut,
+    Copy,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClipboardEntry {
+    pub file_path: PathBuf,
+    pub operation: ClipboardOperation,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +85,7 @@ pub struct App {
     pub status_message: Option<StatusMessage>,
     pub search_strategy: SearchStrategy,
     pub showing_search_results: bool,
+    pub clipboard: Option<ClipboardEntry>,
 }
 
 impl App {
@@ -87,13 +101,14 @@ impl App {
             search_results: Vec::new(),
             search_list_state: ListState::default(),
             status_message: Some(StatusMessage {
-                text: "Press '/' to search, 'q' to quit, Enter to navigate".to_string(),
+                text: "Press '/' to search, 'q' to quit, Enter to navigate, 'x' to cut, 'c' to copy, 'v' to paste".to_string(),
                 message_type: MessageType::Info,
                 timestamp: Instant::now(),
                 fade_duration: Duration::from_secs(u64::MAX), // Never fade the default message
             }),
             search_strategy: SearchStrategy::Fast,
             showing_search_results: false,
+            clipboard: None,
         };
         app.list_state.select(Some(0));
         app
@@ -124,7 +139,7 @@ impl App {
         if let Some(msg) = &self.status_message {
             if msg.timestamp.elapsed() > msg.fade_duration {
                 self.status_message = Some(StatusMessage {
-                    text: "Press '/' to search, 'q' to quit, Enter to navigate".to_string(),
+                    text: "Press '/' to search, 'q' to quit, Enter to navigate, 'x' to cut, 'c' to copy, 'v' to paste".to_string(),
                     message_type: MessageType::Info,
                     timestamp: Instant::now(),
                     fade_duration: Duration::from_secs(u64::MAX),
@@ -318,7 +333,7 @@ impl App {
         self.search_results.clear();
         self.search_list_state = ListState::default();
         self.list_state.select(Some(0));
-        self.set_info_message("Press '/' to search, 'q' to quit, Enter to navigate".to_string());
+        self.set_info_message("Press '/' to search, 'q' to quit, Enter to navigate, 'x' to cut, 'c' to copy, 'v' to paste".to_string());
     }
 
     pub fn open_selected_file(&mut self) -> Result<String, String> {
@@ -384,6 +399,267 @@ impl App {
         match self.file_share_server.share_file(&selected_file_path).await {
             Ok(url) => Ok(format!("Shared '{}' - Link copied to clipboard: {}", file_name, url)),
             Err(e) => Err(format!("Failed to share '{}': {}", file_name, e)),
+        }
+    }
+
+    pub fn cut_selected_file(&mut self) -> Result<String, String> {
+        let (file_path, file_name) = {
+            let selected_file = self.get_selected_file()?;
+            (selected_file.path.clone(), selected_file.name.clone())
+        };
+        
+        self.clipboard = Some(ClipboardEntry {
+            file_path,
+            operation: ClipboardOperation::Cut,
+        });
+        
+        Ok(format!("Cut '{}' - navigate to destination and press 'v' to paste", file_name))
+    }
+
+    pub fn copy_selected_file(&mut self) -> Result<String, String> {
+        let (file_path, file_name) = {
+            let selected_file = self.get_selected_file()?;
+            (selected_file.path.clone(), selected_file.name.clone())
+        };
+        
+        self.clipboard = Some(ClipboardEntry {
+            file_path,
+            operation: ClipboardOperation::Copy,
+        });
+        
+        Ok(format!("Copied '{}' - navigate to destination and press 'v' to paste", file_name))
+    }
+
+    pub fn paste_file(&mut self) -> Result<String, String> {
+        let clipboard_entry = match &self.clipboard {
+            Some(entry) => entry.clone(),
+            None => return Err("Nothing to paste - cut or copy a file first".to_string()),
+        };
+
+        // Check if source file still exists
+        if !clipboard_entry.file_path.exists() {
+            self.clipboard = None;
+            return Err("Source file no longer exists".to_string());
+        }
+
+        let source_path = &clipboard_entry.file_path;
+        let current_dir = self.explorer.current_path();
+        
+        // Get the filename from the source path
+        let file_name = source_path.file_name()
+            .ok_or("Invalid source file path")?;
+        
+        let destination_path = current_dir.join(file_name);
+
+        // Check if destination already exists
+        if destination_path.exists() {
+            return Err(format!("File '{}' already exists in destination directory", file_name.to_string_lossy()));
+        }
+
+        // Check if we're trying to move/copy to the same directory
+        if let Some(source_parent) = source_path.parent() {
+            if source_parent == current_dir {
+                return Err("Cannot paste file to the same directory".to_string());
+            }
+        }
+
+        match clipboard_entry.operation {
+            ClipboardOperation::Copy => {
+                match self.copy_file_operation(source_path, &destination_path) {
+                    Ok(_) => {
+                        self.explorer.refresh().map_err(|e| format!("Failed to refresh: {}", e))?;
+                        Ok(format!("Copied '{}' to current directory", file_name.to_string_lossy()))
+                    }
+                    Err(e) => Err(format!("Failed to copy file: {}", e)),
+                }
+            }
+            ClipboardOperation::Cut => {
+                match self.move_file_operation(source_path, &destination_path) {
+                    Ok(_) => {
+                        self.clipboard = None; // Clear clipboard after successful cut operation
+                        self.explorer.refresh().map_err(|e| format!("Failed to refresh: {}", e))?;
+                        Ok(format!("Moved '{}' to current directory", file_name.to_string_lossy()))
+                    }
+                    Err(e) => Err(format!("Failed to move file: {}", e)),
+                }
+            }
+        }
+    }
+
+    fn copy_file_operation(&self, source: &PathBuf, destination: &PathBuf) -> Result<(), std::io::Error> {
+        if source.is_dir() {
+            self.copy_directory_recursive(source, destination)
+        } else {
+            std::fs::copy(source, destination)?;
+            Ok(())
+        }
+    }
+
+    fn copy_directory_recursive(&self, source: &PathBuf, destination: &PathBuf) -> Result<(), std::io::Error> {
+        std::fs::create_dir_all(destination)?;
+        
+        for entry in std::fs::read_dir(source)? {
+            let entry = entry?;
+            let source_path = entry.path();
+            let dest_path = destination.join(entry.file_name());
+            
+            if source_path.is_dir() {
+                self.copy_directory_recursive(&source_path, &dest_path)?;
+            } else {
+                std::fs::copy(&source_path, &dest_path)?;
+            }
+        }
+        
+        Ok(())
+    }
+
+    fn move_file_operation(&self, source: &PathBuf, destination: &PathBuf) -> Result<(), std::io::Error> {
+        std::fs::rename(source, destination)
+    }
+
+    pub fn get_file_preview(&self) -> Vec<String> {
+        let files = self.explorer.files();
+        let selected_index = match self.list_state.selected() {
+            Some(index) => index,
+            None => return vec!["No file selected".to_string()],
+        };
+        
+        if selected_index >= files.len() {
+            return vec!["No file selected".to_string()];
+        }
+        
+        let selected_file = &files[selected_index];
+
+        if selected_file.is_directory {
+            // For directories, show the contents
+            match std::fs::read_dir(&selected_file.path) {
+                Ok(entries) => {
+                    let mut items = Vec::new();
+                    items.push(format!("📁 Directory: {}", selected_file.name));
+                    items.push("".to_string());
+                    
+                    let mut dir_entries: Vec<_> = entries.collect();
+                    dir_entries.sort_by(|a, b| {
+                        match (a.as_ref().unwrap().path().is_dir(), b.as_ref().unwrap().path().is_dir()) {
+                            (true, false) => std::cmp::Ordering::Less,
+                            (false, true) => std::cmp::Ordering::Greater,
+                            _ => a.as_ref().unwrap().file_name().cmp(&b.as_ref().unwrap().file_name()),
+                        }
+                    });
+
+                    for (i, entry) in dir_entries.iter().enumerate() {
+                        if i >= 10 { // Limit to 10 items
+                            items.push(format!("... and {} more items", dir_entries.len() - 10));
+                            break;
+                        }
+                        if let Ok(entry) = entry {
+                            let icon = if entry.path().is_dir() { "📁" } else { "📄" };
+                            items.push(format!("{} {}", icon, entry.file_name().to_string_lossy()));
+                        }
+                    }
+                    items
+                }
+                Err(_) => vec!["Error reading directory".to_string()],
+            }
+        } else {
+            // For files, show the first 10 lines
+            match std::fs::read_to_string(&selected_file.path) {
+                Ok(content) => {
+                    let mut lines = Vec::new();
+                    lines.push(format!("📄 File: {} ({:.1} KB)", 
+                        selected_file.name, 
+                        selected_file.size as f64 / 1024.0));
+                    lines.push("".to_string());
+                    
+                    let file_lines: Vec<&str> = content.lines().collect();
+                    let preview_lines = if file_lines.len() > 10 {
+                        &file_lines[..10]
+                    } else {
+                        &file_lines
+                    };
+                    
+                    for (i, line) in preview_lines.iter().enumerate() {
+                        // Truncate very long lines
+                        let truncated_line = if line.len() > 60 {
+                            format!("{}...", &line[..57])
+                        } else {
+                            line.to_string()
+                        };
+                        lines.push(format!("{:2}: {}", i + 1, truncated_line));
+                    }
+                    
+                    if file_lines.len() > 10 {
+                        lines.push("".to_string());
+                        lines.push(format!("... ({} more lines)", file_lines.len() - 10));
+                    }
+                    
+                    lines
+                }
+                Err(_) => {
+                    // For binary files or files that can't be read as text
+                    let extension = selected_file.path.extension()
+                        .and_then(|ext| ext.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    
+                    match extension.as_str() {
+                        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "svg" | "ico" | "webp" => {
+                            vec![
+                                format!("🖼️  Image: {}", selected_file.name),
+                                format!("Size: {:.1} KB", selected_file.size as f64 / 1024.0),
+                                "".to_string(),
+                                "Image file - use 'o' to open".to_string(),
+                                "or 's' to share via web".to_string(),
+                            ]
+                        }
+                        "mp4" | "avi" | "mov" | "wmv" | "flv" | "webm" | "mkv" => {
+                            vec![
+                                format!("🎥 Video: {}", selected_file.name),
+                                format!("Size: {:.1} MB", selected_file.size as f64 / (1024.0 * 1024.0)),
+                                "".to_string(),
+                                "Video file - use 'o' to open".to_string(),
+                                "or 's' to share via web".to_string(),
+                            ]
+                        }
+                        "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" => {
+                            vec![
+                                format!("🎵 Audio: {}", selected_file.name),
+                                format!("Size: {:.1} MB", selected_file.size as f64 / (1024.0 * 1024.0)),
+                                "".to_string(),
+                                "Audio file - use 'o' to open".to_string(),
+                                "or 's' to share via web".to_string(),
+                            ]
+                        }
+                        "pdf" => {
+                            vec![
+                                format!("📄 PDF: {}", selected_file.name),
+                                format!("Size: {:.1} MB", selected_file.size as f64 / (1024.0 * 1024.0)),
+                                "".to_string(),
+                                "PDF document - use 'o' to open".to_string(),
+                                "or 's' to share via web".to_string(),
+                            ]
+                        }
+                        "zip" | "tar" | "gz" | "rar" | "7z" => {
+                            vec![
+                                format!("📦 Archive: {}", selected_file.name),
+                                format!("Size: {:.1} MB", selected_file.size as f64 / (1024.0 * 1024.0)),
+                                "".to_string(),
+                                "Archive file - use 'o' to open".to_string(),
+                                "with system default".to_string(),
+                            ]
+                        }
+                        _ => {
+                            vec![
+                                format!("📄 Binary: {}", selected_file.name),
+                                format!("Size: {:.1} KB", selected_file.size as f64 / 1024.0),
+                                "".to_string(),
+                                "Binary file - cannot preview".to_string(),
+                                "Use 'o' to open with default app".to_string(),
+                            ]
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -502,6 +778,21 @@ async fn run_app<B: Backend>(
                                 },
                                 Err(err) => app.set_error_message(err),
                             }
+                        } else if key_bindings.matches_key(&key_bindings.actions.cut, &key.code) {
+                            match app.cut_selected_file() {
+                                Ok(msg) => app.set_info_message(msg),
+                                Err(err) => app.set_error_message(err),
+                            }
+                        } else if key_bindings.matches_key(&key_bindings.actions.copy, &key.code) {
+                            match app.copy_selected_file() {
+                                Ok(msg) => app.set_info_message(msg),
+                                Err(err) => app.set_error_message(err),
+                            }
+                        } else if key_bindings.matches_key(&key_bindings.actions.paste, &key.code) {
+                            match app.paste_file() {
+                                Ok(msg) => app.set_info_message(msg),
+                                Err(err) => app.set_error_message(err),
+                            }
                         } else if key_bindings.matches_key(&key_bindings.search_results.back, &key.code) {
                             app.clear_search_results();
                         } else if key_bindings.matches_key(&key_bindings.search_mode.toggle_strategy, &key.code) {
@@ -543,6 +834,21 @@ async fn run_app<B: Backend>(
                                         app.set_info_message(msg);
                                     }
                                 },
+                                Err(err) => app.set_error_message(err),
+                            }
+                        } else if key_bindings.matches_key(&key_bindings.actions.cut, &key.code) {
+                            match app.cut_selected_file() {
+                                Ok(msg) => app.set_info_message(msg),
+                                Err(err) => app.set_error_message(err),
+                            }
+                        } else if key_bindings.matches_key(&key_bindings.actions.copy, &key.code) {
+                            match app.copy_selected_file() {
+                                Ok(msg) => app.set_info_message(msg),
+                                Err(err) => app.set_error_message(err),
+                            }
+                        } else if key_bindings.matches_key(&key_bindings.actions.paste, &key.code) {
+                            match app.paste_file() {
+                                Ok(msg) => app.set_info_message(msg),
                                 Err(err) => app.set_error_message(err),
                             }
                         } else if key_bindings.matches_key(&key_bindings.search_mode.toggle_strategy, &key.code) {
@@ -597,6 +903,16 @@ fn ui(f: &mut Frame, app: &App) {
 }
 
 fn render_file_list(f: &mut Frame, app: &App, area: Rect) {
+    // Split the area into two columns: file list (60%) and preview (40%)
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(60),
+            Constraint::Percentage(40),
+        ])
+        .split(area);
+
+    // Render file list in the left column
     let items: Vec<ListItem> = app
         .explorer
         .files()
@@ -646,7 +962,22 @@ fn render_file_list(f: &mut Frame, app: &App, area: Rect) {
         .highlight_style(Style::default().bg(Color::DarkGray))
         .highlight_symbol("► ");
 
-    f.render_stateful_widget(list, area, &mut app.list_state.clone());
+    f.render_stateful_widget(list, chunks[0], &mut app.list_state.clone());
+
+    // Render preview in the right column
+    let preview_lines = app.get_file_preview();
+    let preview_items: Vec<ListItem> = preview_lines
+        .iter()
+        .map(|line| ListItem::new(line.as_str()))
+        .collect();
+
+    let preview_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Preview ")
+        .border_style(Style::default().fg(Color::Green));
+
+    let preview_list = List::new(preview_items).block(preview_block);
+    f.render_widget(preview_list, chunks[1]);
 }
 
 fn render_search_results(f: &mut Frame, app: &App, area: Rect) {
@@ -712,8 +1043,24 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
             kb.get_key_display(&kb.navigation.up)
         )
     } else if app.showing_search_results {
+        let clipboard_status = if let Some(clipboard) = &app.clipboard {
+            let operation = match clipboard.operation {
+                ClipboardOperation::Cut => "CUT",
+                ClipboardOperation::Copy => "COPIED",
+            };
+            let file_name = clipboard.file_path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?");
+            format!(" | {}: {} [{}]", 
+                    kb.get_key_display(&kb.actions.paste), 
+                    operation, 
+                    file_name)
+        } else {
+            String::new()
+        };
+        
         format!(
-            "{}: Quit | {}: New search | {}: Back | {}: Navigate | {}: Open/Navigate | {}: Open | {}: Reveal | {}: Share",
+            "{}: Quit | {}: New search | {}: Back | {}: Navigate | {}: Open/Navigate | {}: Open | {}: Reveal | {}: Share | {}: Cut | {}: Copy{}",
             kb.get_key_display(&kb.actions.quit),
             kb.get_key_display(&kb.actions.search),
             kb.get_key_display(&kb.search_results.back),
@@ -721,11 +1068,30 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
             kb.get_key_display(&kb.navigation.enter),
             kb.get_key_display(&kb.actions.open),
             kb.get_key_display(&kb.actions.reveal),
-            kb.get_key_display(&kb.actions.share)
+            kb.get_key_display(&kb.actions.share),
+            kb.get_key_display(&kb.actions.cut),
+            kb.get_key_display(&kb.actions.copy),
+            clipboard_status
         )
     } else {
+        let clipboard_status = if let Some(clipboard) = &app.clipboard {
+            let operation = match clipboard.operation {
+                ClipboardOperation::Cut => "CUT",
+                ClipboardOperation::Copy => "COPIED",
+            };
+            let file_name = clipboard.file_path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?");
+            format!(" | {}: {} [{}]", 
+                    kb.get_key_display(&kb.actions.paste), 
+                    operation, 
+                    file_name)
+        } else {
+            String::new()
+        };
+        
         format!(
-            "{}: Quit | {}: Search | {}: Navigate | {}: Open/Navigate | {}: Go up | {}: Open | {}: Reveal | {}: Share",
+            "{}: Quit | {}: Search | {}: Navigate | {}: Open/Navigate | {}: Go up | {}: Open | {}: Reveal | {}: Share | {}: Cut | {}: Copy{}",
             kb.get_key_display(&kb.actions.quit),
             kb.get_key_display(&kb.actions.search),
             kb.get_key_display(&kb.navigation.up),
@@ -733,7 +1099,10 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
             kb.get_key_display(&kb.navigation.left),
             kb.get_key_display(&kb.actions.open),
             kb.get_key_display(&kb.actions.reveal),
-            kb.get_key_display(&kb.actions.share)
+            kb.get_key_display(&kb.actions.share),
+            kb.get_key_display(&kb.actions.cut),
+            kb.get_key_display(&kb.actions.copy),
+            clipboard_status
         )
     };
     

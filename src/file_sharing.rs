@@ -50,11 +50,12 @@ pub struct FileShareServer {
 
 impl FileShareServer {
     pub fn new() -> Self {
+        let config = Config::load_default();
         Self {
             shared_files: Arc::new(RwLock::new(HashMap::new())),
-            server_port: 8080, // Default port
+            server_port: config.file_sharing.server_port,
             is_running: Arc::new(RwLock::new(false)),
-            config: Config::load_default(),
+            config,
         }
     }
 
@@ -363,8 +364,8 @@ impl FileShareServer {
                                         };
                                         format!(
                                             "<li><strong>{}</strong> - <em>{}</em><br/>\
-                                            <a href=\"/file/{}\" target=\"_blank\">📄 View {} content</a> | \
-                                            <a href=\"/download/{}\">⬇️ Download</a></li>", 
+                                            <a href=\"/file/{}\" target=\"_blank\"> View {} content</a> | \
+                                            <a href=\"/download/{}\">Download</a></li>", 
                                             name, display_type, id, extension.to_uppercase(), id
                                         )
                                     },
@@ -377,32 +378,37 @@ impl FileShareServer {
                                         };
                                         format!(
                                             "<li><strong>{}</strong> - <em>{}</em><br/>\
-                                            <a href=\"/file/{}\" target=\"_blank\">📊 View table data</a> | \
-                                            <a href=\"/download/{}\">⬇️ Download</a></li>", 
+                                            <a href=\"/file/{}\" target=\"_blank\">View table data</a> | \
+                                            <a href=\"/download/{}\">Download</a></li>", 
                                             name, display_type, id, id
                                         )
                                     },
-                                    "py" | "rs" | "js" | "html" | "css" | "c" | "cpp" | "java" | "go" | "php" => {
+                                    "py" | "rs" | "js" | "html" | "css" | "c" | "cpp" | "java" | "go" | "php" | "sh" | "bash" | "zsh" => {
+                                        let display_name = match extension.as_str() {
+                                            "sh" | "bash" => "Shell script",
+                                            "zsh" => "Zsh script", 
+                                            _ => &format!("{} source code", extension.to_uppercase())
+                                        };
                                         format!(
-                                            "<li><strong>{}</strong> - <em>{} source code</em><br/>\
-                                            <a href=\"/file/{}\" target=\"_blank\">💻 View code</a> | \
-                                            <a href=\"/download/{}\">⬇️ Download</a></li>", 
-                                            name, extension.to_uppercase(), id, id
+                                            "<li><strong>{}</strong> - <em>{}</em><br/>\
+                                            <a href=\"/file/{}\" target=\"_blank\">View code</a> | \
+                                            <a href=\"/download/{}\">Download</a></li>", 
+                                            name, display_name, id, id
                                         )
                                     },
                                     "md" => {
                                         format!(
                                             "<li><strong>{}</strong> - <em>Markdown document</em><br/>\
-                                            <a href=\"/file/{}\" target=\"_blank\">📝 View rendered</a> | \
-                                            <a href=\"/download/{}\">⬇️ Download</a></li>", 
+                                            <a href=\"/file/{}\" target=\"_blank\">View rendered</a> | \
+                                            <a href=\"/download/{}\">Download</a></li>", 
                                             name, id, id
                                         )
                                     },
                                     "pdf" => {
                                         format!(
                                             "<li><strong>{}</strong> - <em>PDF document</em><br/>\
-                                            <a href=\"/file/{}\" target=\"_blank\">📋 View PDF</a> | \
-                                            <a href=\"/download/{}\">⬇️ Download</a></li>", 
+                                            <a href=\"/file/{}\" target=\"_blank\">View PDF</a> | \
+                                            <a href=\"/download/{}\">Download</a></li>", 
                                             name, id, id
                                         )
                                     },
@@ -529,8 +535,11 @@ impl FileShareServer {
     }
 
     async fn find_available_port(&mut self) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
-        // Try ports starting from 8080
-        for port in 8080..8090 {
+        // Try ports starting from configured port range
+        let start_port = self.config.file_sharing.port_range_start;
+        let end_port = self.config.file_sharing.port_range_end;
+        
+        for port in start_port..end_port {
             if self.is_port_available(port).await {
                 self.server_port = port;
                 return Ok(port);
@@ -540,7 +549,7 @@ impl FileShareServer {
         // If no ports are available, wait a bit and try again (in case previous instances are shutting down)
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         
-        for port in 8080..8090 {
+        for port in start_port..end_port {
             if self.is_port_available(port).await {
                 self.server_port = port;
                 return Ok(port);
@@ -600,6 +609,8 @@ fn should_display_inline(path: &Path) -> bool {
         "txt" | "md" | "rst" | "log" | "json" | "geojson" | "xml" | "html" | "htm" | "css" | "js" | "ipynb" => true,
         // Programming languages - display inline
         "py" | "rs" | "c" | "cpp" | "h" | "java" | "go" | "php" | "rb" | "swift" | "kt" => true,
+        // Shell scripts - display inline
+        "sh" | "bash" | "zsh" | "fish" | "csh" | "tcsh" => true,
         // Config files - display inline
         "yml" | "yaml" | "toml" | "ini" | "cfg" | "conf" => true,
         // Spreadsheet files - display inline
@@ -666,6 +677,8 @@ fn get_mime_type(path: &Path) -> &'static str {
         "rb" => "text/x-ruby",
         "swift" => "text/x-swift",
         "kt" => "text/x-kotlin",
+        // Shell scripts
+        "sh" | "bash" | "zsh" | "fish" | "csh" | "tcsh" => "text/x-shellscript",
         // Config files
         "yml" | "yaml" => "text/x-yaml",
         "toml" => "text/x-toml",
@@ -1184,6 +1197,27 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                     </div>
                     <br>
                     <p><a href="/download/{}" class="download-btn">Download JavaScript File</a></p>
+                    <script>
+                        fetch('/raw/{}')
+                            .then(response => response.text())
+                            .then(data => {{
+                                document.getElementById('code-content').textContent = data;
+                                Prism.highlightAll();
+                            }});
+                    </script>
+                </div>"#,
+                file_info.id, file_info.id
+            )
+        },
+        // Shell script files
+        "sh" | "bash" | "zsh" | "fish" | "csh" | "tcsh" => {
+            format!(
+                r#"<div class="code-viewer">
+                    <div style="text-align: left; max-width: 100%; overflow: auto;">
+                        <pre><code class="language-bash" id="code-content"></code></pre>
+                    </div>
+                    <br>
+                    <p><a href="/download/{}" class="download-btn">Download Shell Script</a></p>
                     <script>
                         fetch('/raw/{}')
                             .then(response => response.text())

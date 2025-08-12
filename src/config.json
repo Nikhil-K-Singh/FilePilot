@@ -1,29 +1,9 @@
 {
   "notification_endpoint": "http://localhost:5005/api/data",
   "notification_enabled": true,
-  // "key_bindings": {
-  //   "navigation": {
-  //     "up": ["Up", "k"],
-  //     "down": ["Down", "j"],
-  //     "left": ["Left", "h"],
-  //     "enter": ["Right"]
-  //   },
-  //   "actions": {
-  //     "quit": ["q"],
-  //     "search": ["/"],
-  //     "open": ["o", "O"],
-  //     "reveal": ["r", "R"],
-  //     "share": ["s", "S"]
-  //   },
-  //   "search_mode": {
-  //     "exit_search": ["Esc"],
-  //     "exit_to_results": ["Enter"],
-  //     "toggle_strategy": ["F2"],
-  //     "navigate_tab": ["Tab"],
-  //     "backspace": ["Backspace"]
-  //   },
-  //   "search_results": {
-  //     "back": ["Esc", "Left"]
-  //   }
-  // }
+  "file_sharing": {
+    "server_port": 8080,
+    "port_range_start": 8080,
+    "port_range_end": 8090
+  }
 }
