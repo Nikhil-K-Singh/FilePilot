@@ -20,6 +20,9 @@ const MAX_JSON_CLIENT_SIZE: u64 = 5 * 1024 * 1024; // 5MB limit for client-side 
 const MAX_NOTEBOOK_SIZE: u64 = 50 * 1024 * 1024; // 50MB limit for notebooks
 const MAX_MARKDOWN_SIZE: u64 = 5 * 1024 * 1024; // 5MB limit for markdown
 const MAX_SPREADSHEET_SIZE: u64 = 10 * 1024 * 1024; // 10MB limit for spreadsheets
+const MAX_TEXT_PREVIEW_SIZE: u64 = 10 * 1024 * 1024; // 10MB limit for text file previews
+const MAX_CODE_PREVIEW_SIZE: u64 = 5 * 1024 * 1024; // 5MB limit for code file previews
+const MAX_FILE_PREVIEW_SIZE: u64 = 5 * 1024 * 1024; // 5MB global limit for any file preview
 const MAX_CSV_ROWS: usize = 1000; // Maximum rows to display for CSV
 const MAX_EXCEL_ROWS: usize = 1000; // Maximum rows to display for Excel
 
@@ -439,7 +442,7 @@ impl FileShareServer {
                         video, audio {{ border-radius: 4px; }}\
                         </style>\
                         </head><body>\
-                        <h1>🚀 FilePilot - Shared Files</h1>\
+                        <h1>FilePilot - Shared Files</h1>\
                         <p>Files shared from your FilePilot file explorer:</p>\
                         <ul>{}</ul>\
                         </body></html>",
@@ -869,6 +872,118 @@ fn parse_excel_to_html(file_path: &Path, max_rows: usize) -> Result<String, Box<
 }
 
 fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
+    // Global file size check - prevent displaying any file larger than 5MB
+    let file_path = Path::new(&file_info.path);
+    if let Ok(metadata) = std::fs::metadata(file_path) {
+        if metadata.len() > MAX_FILE_PREVIEW_SIZE {
+            let size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
+            let viewer_content = format!(
+                r#"<div class="file-info">
+                    <h3>Large File: {}</h3>
+                    <p>File too large for preview ({:.1} MB)</p>
+                    <p>Files larger than {:.1} MB cannot be displayed to prevent browser issues.</p>
+                    <p>Use the download button above to save the file to your device.</p>
+                    <p><a href="/raw/{}" target="_blank" style="color: #58a6ff;">View Raw Content (Advanced Users Only)</a></p>
+                </div>"#,
+                file_info.name,
+                size_mb,
+                MAX_FILE_PREVIEW_SIZE as f64 / (1024.0 * 1024.0),
+                file_info.id
+            );
+            
+            return format!(
+                r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>{}</title>
+    <meta charset="UTF-8">
+    <style>
+        body {{ 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            background-color: #1a1a1a; 
+            color: #e0e0e0;
+        }}
+        .container {{ 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            background-color: #2d2d2d; 
+            padding: 20px; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3); 
+        }}
+        h1 {{ 
+            color: #ffffff; 
+            text-align: center; 
+            margin-bottom: 20px; 
+        }}
+        .qr-section {{
+            text-align: center;
+            margin: 20px auto 30px auto;
+            padding: 20px;
+            background-color: #3a3a3a;
+            border-radius: 10px;
+            border: 2px solid #0d7377;
+        }}
+        .qr-code {{
+            margin: 20px auto;
+            max-width: 300px;
+            display: flex;
+            justify-content: center;
+        }}
+        .qr-code > div {{
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+        }}
+        .file-info {{ 
+            text-align: center; 
+            padding: 20px; 
+            color: #e0e0e0;
+        }}
+        .download-btn {{ 
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: #0d7377;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            margin: 10px;
+            font-weight: bold;
+            font-size: 16px;
+        }}
+        .download-btn:hover {{ 
+            background-color: #14a085; 
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{}</h1>
+        <div class="qr-section">
+            <div class="qr-code">
+                <div>
+                    <img src="data:image/png;base64,{}" alt="QR Code" style="display: block;" />
+                </div>
+            </div>
+            <p><a href="/download/{}" class="download-btn">Download {}</a></p>
+        </div>
+        <div class="file-content">
+            {}
+        </div>
+    </div>
+</body>
+</html>"#,
+                file_info.name, 
+                file_info.name, 
+                generate_qr_code_base64(share_url).unwrap_or_else(|_| "".to_string()),
+                file_info.id,
+                file_info.name,
+                viewer_content
+            );
+        }
+    }
+
     let extension = Path::new(&file_info.name)
         .extension()
         .and_then(|ext| ext.to_str())
@@ -882,10 +997,8 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                 r#"<video controls autoplay name="media" style="width: 100%; max-width: 800px; height: auto;">
                     <source src="/raw/{}" type="{}">
                     Your browser does not support the video tag.
-                </video>
-                <br><br>
-                <p><a href="/download/{}" class="download-btn">Download Video</a></p>"#,
-                file_info.id, get_mime_type(&Path::new(&file_info.name)), file_info.id
+                </video>"#,
+                file_info.id, get_mime_type(&Path::new(&file_info.name))
             )
         },
         // Audio files
@@ -896,19 +1009,15 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                         <source src="/raw/{}" type="{}">
                         Your browser does not support the audio tag.
                     </audio>
-                    <br><br>
-                    <p><a href="/download/{}" class="download-btn">Download Audio</a></p>
                 </div>"#,
-                file_info.id, get_mime_type(&Path::new(&file_info.name)), file_info.id
+                file_info.id, get_mime_type(&Path::new(&file_info.name))
             )
         },
         // Image files
         "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "svg" => {
             format!(
-                r#"<img src="/raw/{}" alt="{}" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 5px;">
-                <br><br>
-                <p><a href="/download/{}" class="download-btn">Download Image</a></p>"#,
-                file_info.id, file_info.name, file_info.id
+                r#"<img src="/raw/{}" alt="{}" style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 5px;">"#,
+                file_info.id, file_info.name
             )
         },
         // JSON files - formatted display
@@ -929,28 +1038,24 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                                                     <pre><code class="language-json">{}</code></pre>
                                                 </div>
                                                 <br>
-                                                <p>⚡ Large JSON file ({:.1} MB) - processed server-side for optimal performance</p>
-                                                <p><a href="/download/{}" class="download-btn">Download JSON</a></p>
+                                                <p>Large JSON file ({:.1} MB) - processed server-side for optimal performance</p>
                                                 <script>
                                                     // Apply syntax highlighting after content is loaded
                                                     Prism.highlightAll();
                                                 </script>
                                             </div>"#,
                                             escape_html(&formatted), 
-                                            metadata.len() as f64 / (1024.0 * 1024.0),
-                                            file_info.id
+                                            metadata.len() as f64 / (1024.0 * 1024.0)
                                         ),
                                         Err(_) => format!(
                                             r#"<div class="file-info">
                                                 <h3>Large JSON File: {}</h3>
-                                                <p>⚠️ JSON file too large for formatted preview ({:.1} MB)</p>
+                                                <p>JSON file too large for formatted preview ({:.1} MB)</p>
                                                 <p>File contains malformed JSON that cannot be formatted.</p>
-                                                <p><a href="/download/{}" class="download-btn">Download JSON</a></p>
                                                 <p><a href="/raw/{}" target="_blank">View Raw Content</a></p>
                                             </div>"#,
                                             file_info.name, 
                                             metadata.len() as f64 / (1024.0 * 1024.0),
-                                            file_info.id,
                                             file_info.id
                                         )
                                     }
@@ -958,7 +1063,7 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                                 Err(_) => format!(
                                     r#"<div class="file-info">
                                         <h3>Large JSON File: {}</h3>
-                                        <p>⚠️ JSON file too large for formatted preview ({:.1} MB)</p>
+                                        <p>JSON file too large for formatted preview ({:.1} MB)</p>
                                         <p>File contains malformed JSON that cannot be parsed.</p>
                                         <p><a href="/download/{}" class="download-btn">Download JSON</a></p>
                                         <p><a href="/raw/{}" target="_blank">View Raw Content</a></p>
@@ -986,8 +1091,6 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                             <div style="text-align: left; max-width: 100%; overflow: auto;">
                                 <pre><code class="language-json" id="code-content"></code></pre>
                             </div>
-                            <br>
-                            <p><a href="/download/{}" class="download-btn">Download JSON</a></p>
                             <script>
                                 fetch('/raw/{}')
                                     .then(response => response.text())
@@ -1005,7 +1108,7 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                                     }});
                             </script>
                         </div>"#,
-                        file_info.id, file_info.id
+                        file_info.id
                     )
                 }
             } else {
@@ -1036,7 +1139,7 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                                                     <pre><code class="language-json">{}</code></pre>
                                                 </div>
                                                 <br>
-                                                <p>⚡ Large GeoJSON file ({:.1} MB) - processed server-side for optimal performance</p>
+                                                <p>Large GeoJSON file ({:.1} MB) - processed server-side for optimal performance</p>
                                                 <p><a href="/download/{}" class="download-btn">Download GeoJSON</a></p>
                                                 <script>
                                                     // Apply syntax highlighting after content is loaded
@@ -1050,7 +1153,7 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                                         Err(_) => format!(
                                             r#"<div class="file-info">
                                                 <h3>Large GeoJSON File: {}</h3>
-                                                <p>⚠️ GeoJSON file too large for formatted preview ({:.1} MB)</p>
+                                                <p>GeoJSON file too large for formatted preview ({:.1} MB)</p>
                                                 <p>File contains malformed GeoJSON that cannot be formatted.</p>
                                                 <p><a href="/download/{}" class="download-btn">Download GeoJSON</a></p>
                                                 <p><a href="/raw/{}" target="_blank">View Raw Content</a></p>
@@ -1065,7 +1168,7 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                                 Err(_) => format!(
                                     r#"<div class="file-info">
                                         <h3>Large GeoJSON File: {}</h3>
-                                        <p>⚠️ GeoJSON file too large for formatted preview ({:.1} MB)</p>
+                                        <p>GeoJSON file too large for formatted preview ({:.1} MB)</p>
                                         <p>File contains malformed GeoJSON that cannot be parsed.</p>
                                         <p><a href="/download/{}" class="download-btn">Download GeoJSON</a></p>
                                         <p><a href="/raw/{}" target="_blank">View Raw Content</a></p>
@@ -1148,87 +1251,183 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
         },
         // Python files - syntax highlighted display
         "py" => {
-            format!(
-                r#"<div class="code-viewer">
-                    <div style="text-align: left; max-width: 100%; overflow: auto;">
-                        <pre><code class="language-python" id="code-content"></code></pre>
-                    </div>
-                    <br>
-                    <p><a href="/download/{}" class="download-btn">Download Python File</a></p>
-                    <script>
-                        fetch('/raw/{}')
-                            .then(response => response.text())
-                            .then(data => {{
-                                document.getElementById('code-content').textContent = data;
-                                Prism.highlightAll();
-                            }});
-                    </script>
-                </div>"#,
-                file_info.id, file_info.id
-            )
+            // Check file size first
+            let file_path = Path::new(&file_info.path);
+            if let Ok(metadata) = std::fs::metadata(file_path) {
+                if metadata.len() > MAX_CODE_PREVIEW_SIZE {
+                    format!(
+                        r#"<div class="file-info">
+                            <h3>Python File: {}</h3>
+                            <p>File too large for preview ({:.1} MB)</p>
+                            <p>Files larger than {:.1} MB cannot be previewed.</p>
+                            <p><a href="/raw/{}" target="_blank">View Raw Content</a></p>
+                        </div>"#,
+                        file_info.name, 
+                        metadata.len() as f64 / (1024.0 * 1024.0),
+                        MAX_CODE_PREVIEW_SIZE as f64 / (1024.0 * 1024.0),
+                        file_info.id
+                    )
+                } else {
+                    format!(
+                        r#"<div class="code-viewer">
+                            <div style="text-align: left; max-width: 100%; overflow: auto;">
+                                <pre><code class="language-python" id="code-content"></code></pre>
+                            </div>
+                            <script>
+                                fetch('/raw/{}')
+                                    .then(response => response.text())
+                                    .then(data => {{
+                                        document.getElementById('code-content').textContent = data;
+                                        Prism.highlightAll();
+                                    }});
+                            </script>
+                        </div>"#,
+                        file_info.id
+                    )
+                }
+            } else {
+                format!(
+                    r#"<div class="file-info">
+                        <h3>Error reading Python file: {}</h3>
+                    </div>"#,
+                    file_info.name
+                )
+            }
         },
         // Rust files
         "rs" => {
-            format!(
-                r#"<div class="code-viewer">
-                    <div style="text-align: left; max-width: 100%; overflow: auto;">
-                        <pre><code class="language-rust" id="code-content"></code></pre>
-                    </div>
-                    <br>
-                    <p><a href="/download/{}" class="download-btn">Download Rust File</a></p>
-                    <script>
-                        fetch('/raw/{}')
-                            .then(response => response.text())
-                            .then(data => {{
-                                document.getElementById('code-content').textContent = data;
-                                Prism.highlightAll();
-                            }});
-                    </script>
-                </div>"#,
-                file_info.id, file_info.id
-            )
+            // Check file size first
+            let file_path = Path::new(&file_info.path);
+            if let Ok(metadata) = std::fs::metadata(file_path) {
+                if metadata.len() > MAX_CODE_PREVIEW_SIZE {
+                    format!(
+                        r#"<div class="file-info">
+                            <h3>Rust File: {}</h3>
+                            <p>File too large for preview ({:.1} MB)</p>
+                            <p>Files larger than {:.1} MB cannot be previewed.</p>
+                            <p><a href="/raw/{}" target="_blank">View Raw Content</a></p>
+                        </div>"#,
+                        file_info.name, 
+                        metadata.len() as f64 / (1024.0 * 1024.0),
+                        MAX_CODE_PREVIEW_SIZE as f64 / (1024.0 * 1024.0),
+                        file_info.id
+                    )
+                } else {
+                    format!(
+                        r#"<div class="code-viewer">
+                            <div style="text-align: left; max-width: 100%; overflow: auto;">
+                                <pre><code class="language-rust" id="code-content"></code></pre>
+                            </div>
+                            <script>
+                                fetch('/raw/{}')
+                                    .then(response => response.text())
+                                    .then(data => {{
+                                        document.getElementById('code-content').textContent = data;
+                                        Prism.highlightAll();
+                                    }});
+                            </script>
+                        </div>"#,
+                        file_info.id
+                    )
+                }
+            } else {
+                format!(
+                    r#"<div class="file-info">
+                        <h3>Error reading Rust file: {}</h3>
+                    </div>"#,
+                    file_info.name
+                )
+            }
         },
         // JavaScript files
         "js" => {
-            format!(
-                r#"<div class="code-viewer">
-                    <div style="text-align: left; max-width: 100%; overflow: auto;">
-                        <pre><code class="language-javascript" id="code-content"></code></pre>
-                    </div>
-                    <br>
-                    <p><a href="/download/{}" class="download-btn">Download JavaScript File</a></p>
-                    <script>
-                        fetch('/raw/{}')
-                            .then(response => response.text())
-                            .then(data => {{
-                                document.getElementById('code-content').textContent = data;
-                                Prism.highlightAll();
-                            }});
-                    </script>
-                </div>"#,
-                file_info.id, file_info.id
-            )
+            // Check file size first
+            let file_path = Path::new(&file_info.path);
+            if let Ok(metadata) = std::fs::metadata(file_path) {
+                if metadata.len() > MAX_CODE_PREVIEW_SIZE {
+                    format!(
+                        r#"<div class="file-info">
+                            <h3>JavaScript File: {}</h3>
+                            <p>File too large for preview ({:.1} MB)</p>
+                            <p>Files larger than {:.1} MB cannot be previewed.</p>
+                            <p><a href="/raw/{}" target="_blank">View Raw Content</a></p>
+                        </div>"#,
+                        file_info.name, 
+                        metadata.len() as f64 / (1024.0 * 1024.0),
+                        MAX_CODE_PREVIEW_SIZE as f64 / (1024.0 * 1024.0),
+                        file_info.id
+                    )
+                } else {
+                    format!(
+                        r#"<div class="code-viewer">
+                            <div style="text-align: left; max-width: 100%; overflow: auto;">
+                                <pre><code class="language-javascript" id="code-content"></code></pre>
+                            </div>
+                            <script>
+                                fetch('/raw/{}')
+                                    .then(response => response.text())
+                                    .then(data => {{
+                                        document.getElementById('code-content').textContent = data;
+                                        Prism.highlightAll();
+                                    }});
+                            </script>
+                        </div>"#,
+                        file_info.id
+                    )
+                }
+            } else {
+                format!(
+                    r#"<div class="file-info">
+                        <h3>Error reading JavaScript file: {}</h3>
+                    </div>"#,
+                    file_info.name
+                )
+            }
         },
         // Shell script files
         "sh" | "bash" | "zsh" | "fish" | "csh" | "tcsh" => {
-            format!(
-                r#"<div class="code-viewer">
-                    <div style="text-align: left; max-width: 100%; overflow: auto;">
-                        <pre><code class="language-bash" id="code-content"></code></pre>
-                    </div>
-                    <br>
-                    <p><a href="/download/{}" class="download-btn">Download Shell Script</a></p>
-                    <script>
-                        fetch('/raw/{}')
-                            .then(response => response.text())
-                            .then(data => {{
-                                document.getElementById('code-content').textContent = data;
-                                Prism.highlightAll();
-                            }});
-                    </script>
-                </div>"#,
-                file_info.id, file_info.id
-            )
+            // Check file size first
+            let file_path = Path::new(&file_info.path);
+            if let Ok(metadata) = std::fs::metadata(file_path) {
+                if metadata.len() > MAX_CODE_PREVIEW_SIZE {
+                    format!(
+                        r#"<div class="file-info">
+                            <h3>Shell Script: {}</h3>
+                            <p>Script too large for preview ({:.1} MB)</p>
+                            <p>Scripts larger than {:.1} MB cannot be previewed.</p>
+                            <p><a href="/raw/{}" target="_blank">View Raw Content</a></p>
+                        </div>"#,
+                        file_info.name, 
+                        metadata.len() as f64 / (1024.0 * 1024.0),
+                        MAX_CODE_PREVIEW_SIZE as f64 / (1024.0 * 1024.0),
+                        file_info.id
+                    )
+                } else {
+                    format!(
+                        r#"<div class="code-viewer">
+                            <div style="text-align: left; max-width: 100%; overflow: auto;">
+                                <pre><code class="language-bash" id="code-content"></code></pre>
+                            </div>
+                            <script>
+                                fetch('/raw/{}')
+                                    .then(response => response.text())
+                                    .then(data => {{
+                                        document.getElementById('code-content').textContent = data;
+                                        Prism.highlightAll();
+                                    }});
+                            </script>
+                        </div>"#,
+                        file_info.id
+                    )
+                }
+            } else {
+                format!(
+                    r#"<div class="file-info">
+                        <h3>Error reading shell script: {}</h3>
+                    </div>"#,
+                    file_info.name
+                )
+            }
         },
         // HTML files
         "html" | "htm" => {
@@ -1435,7 +1634,7 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                     format!(
                         r#"<div class="file-info">
                             <h3>Markdown File: {}</h3>
-                            <p>⚠️ File too large for preview ({:.1} MB)</p>
+                            <p>File too large for preview ({:.1} MB)</p>
                             <p>Files larger than {:.1} MB cannot be rendered as markdown.</p>
                             <p><a href="/download/{}" class="download-btn">Download File</a></p>
                             <p><a href="/raw/{}" target="_blank">View Raw Content</a></p>
@@ -1483,7 +1682,7 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                     format!(
                         r#"<div class="file-info">
                             <h3>Jupyter Notebook: {}</h3>
-                            <p>⚠️ Notebook too large for preview ({:.1} MB)</p>
+                            <p>Notebook too large for preview ({:.1} MB)</p>
                             <p>Notebooks larger than {:.1} MB cannot be rendered.</p>
                             <p><a href="/download/{}" class="download-btn">Download Notebook</a></p>
                             <p><a href="/raw/{}" target="_blank">View Raw JSON</a></p>
@@ -1529,14 +1728,38 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
         },
         // Other text files
         "txt" | "rst" | "log" | "ini" | "cfg" | "conf" => {
-            format!(
-                r#"<div class="text-viewer">
-                    <iframe src="/raw/{}" style="width: 100%; height: 600px; border: 1px solid #ddd; border-radius: 5px;"></iframe>
-                    <br><br>
-                    <p><a href="/download/{}" class="download-btn">Download File</a></p>
-                </div>"#,
-                file_info.id, file_info.id
-            )
+            // Check file size first
+            let file_path = Path::new(&file_info.path);
+            if let Ok(metadata) = std::fs::metadata(file_path) {
+                if metadata.len() > MAX_TEXT_PREVIEW_SIZE {
+                    format!(
+                        r#"<div class="file-info">
+                            <h3>Text File: {}</h3>
+                            <p>File too large for preview ({:.1} MB)</p>
+                            <p>Files larger than {:.1} MB cannot be previewed.</p>
+                            <p><a href="/raw/{}" target="_blank">View Raw Content</a></p>
+                        </div>"#,
+                        file_info.name, 
+                        metadata.len() as f64 / (1024.0 * 1024.0),
+                        MAX_TEXT_PREVIEW_SIZE as f64 / (1024.0 * 1024.0),
+                        file_info.id
+                    )
+                } else {
+                    format!(
+                        r#"<div class="text-viewer">
+                            <iframe src="/raw/{}" style="width: 100%; height: 600px; border: 1px solid #ddd; border-radius: 5px;"></iframe>
+                        </div>"#,
+                        file_info.id
+                    )
+                }
+            } else {
+                format!(
+                    r#"<div class="file-info">
+                        <h3>Error reading text file: {}</h3>
+                    </div>"#,
+                    file_info.name
+                )
+            }
         },
         // CSV files - display as table
         "csv" => {
@@ -1546,7 +1769,7 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                     format!(
                         r#"<div class="file-info">
                             <h3>Large CSV File: {}</h3>
-                            <p>⚠️ CSV file too large for preview ({:.1} MB)</p>
+                            <p>CSV file too large for preview ({:.1} MB)</p>
                             <p>Files over {} MB are not displayed to prevent browser issues.</p>
                             <p><a href="/download/{}" class="download-btn">Download CSV</a></p>
                             <p><a href="/raw/{}" target="_blank">View Raw Content</a></p>
@@ -1597,7 +1820,7 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                     format!(
                         r#"<div class="file-info">
                             <h3>Large Excel File: {}</h3>
-                            <p>⚠️ Excel file too large for preview ({:.1} MB)</p>
+                            <p>Excel file too large for preview ({:.1} MB)</p>
                             <p>Files over {} MB are not displayed to prevent browser issues.</p>
                             <p><a href="/download/{}" class="download-btn">Download Excel File</a></p>
                         </div>"#,
@@ -1610,7 +1833,7 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
                     match parse_excel_to_html(file_path, MAX_EXCEL_ROWS) {
                         Ok(table_html) => format!(
                             r#"<div class="spreadsheet-viewer">
-                                <h3>📊 Excel File: {}</h3>
+                                <h3>Excel File: {}</h3>
                                 {}
                                 <br>
                                 <p><a href="/download/{}" class="download-btn">Download Excel File</a></p>
@@ -1652,14 +1875,27 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
         },
         // Default for other files
         _ => {
+            let file_path = Path::new(&file_info.path);
+            let size_info = if let Ok(metadata) = std::fs::metadata(file_path) {
+                let size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
+                if size_mb >= 1.0 {
+                    format!("Size: {:.1} MB", size_mb)
+                } else {
+                    format!("Size: {:.1} KB", metadata.len() as f64 / 1024.0)
+                }
+            } else {
+                "Size: Unknown".to_string()
+            };
+
             format!(
                 r#"<div class="file-info">
                     <h3>File: {}</h3>
                     <p>File type: {}</p>
+                    <p>{}</p>
                     <p>This file type cannot be previewed in the browser.</p>
-                    <p><a href="/download/{}" class="download-btn">Download File</a></p>
+                    <p>Use the download button above to save the file.</p>
                 </div>"#,
-                file_info.name, extension, file_info.id
+                file_info.name, extension, size_info
             )
         }
     };
@@ -1692,6 +1928,25 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
             text-align: center; 
             margin-bottom: 20px; 
         }}
+        .qr-section {{
+            text-align: center;
+            margin: 20px auto 30px auto;
+            padding: 20px;
+            background-color: #3a3a3a;
+            border-radius: 10px;
+            border: 2px solid #0d7377;
+        }}
+        .qr-code {{
+            margin: 20px auto;
+            max-width: 300px;
+            display: flex;
+            justify-content: center;
+        }}
+        .qr-code > div {{
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+        }}
         .file-info {{ 
             text-align: center; 
             padding: 20px; 
@@ -1699,12 +1954,14 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
         }}
         .download-btn {{ 
             display: inline-block;
-            padding: 10px 20px;
+            padding: 12px 24px;
             background-color: #0d7377;
             color: white;
             text-decoration: none;
             border-radius: 5px;
             margin: 10px;
+            font-weight: bold;
+            font-size: 16px;
         }}
         .download-btn:hover {{ 
             background-color: #14a085; 
@@ -2071,15 +2328,16 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
 <body>
     <div class="container">
         <h1>{}</h1>
-        <div class="file-content">
-            {}
-        </div>
-        <div style="text-align: center; margin-top: 20px;">
-            <div style="margin: 20px auto; max-width: 300px; display: flex; justify-content: center;">
-                <div style="background: white; padding: 10px; border-radius: 8px;">
+        <div class="qr-section">
+            <div class="qr-code">
+                <div>
                     <img src="data:image/png;base64,{}" alt="QR Code" style="display: block;" />
                 </div>
             </div>
+            <p><a href="/download/{}" class="download-btn">Download {}</a></p>
+        </div>
+        <div class="file-content">
+            {}
         </div>
     </div>
     <!-- Prism.js JavaScript for syntax highlighting -->
@@ -2087,8 +2345,12 @@ fn create_file_viewer_page(file_info: &FileInfo, share_url: &str) -> String {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
 </body>
 </html>"#,
-        file_info.name, file_info.name, viewer_content,
-        generate_qr_code_base64(share_url).unwrap_or_else(|_| "".to_string())
+        file_info.name, 
+        file_info.name, 
+        generate_qr_code_base64(share_url).unwrap_or_else(|_| "".to_string()),
+        file_info.id,
+        file_info.name,
+        viewer_content
     )
 }
 

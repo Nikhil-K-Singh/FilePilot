@@ -605,7 +605,7 @@ impl App {
                     match extension.as_str() {
                         "jpg" | "jpeg" | "png" | "gif" | "bmp" | "svg" | "ico" | "webp" => {
                             vec![
-                                format!("🖼️  Image: {}", selected_file.name),
+                                format!("Image: {}", selected_file.name),
                                 format!("Size: {:.1} KB", selected_file.size as f64 / 1024.0),
                                 "".to_string(),
                                 "Image file - use 'o' to open".to_string(),
@@ -632,7 +632,7 @@ impl App {
                         }
                         "pdf" => {
                             vec![
-                                format!("📄 PDF: {}", selected_file.name),
+                                format!("PDF: {}", selected_file.name),
                                 format!("Size: {:.1} MB", selected_file.size as f64 / (1024.0 * 1024.0)),
                                 "".to_string(),
                                 "PDF document - use 'o' to open".to_string(),
@@ -641,7 +641,7 @@ impl App {
                         }
                         "zip" | "tar" | "gz" | "rar" | "7z" => {
                             vec![
-                                format!("📦 Archive: {}", selected_file.name),
+                                format!("Archive: {}", selected_file.name),
                                 format!("Size: {:.1} MB", selected_file.size as f64 / (1024.0 * 1024.0)),
                                 "".to_string(),
                                 "Archive file - use 'o' to open".to_string(),
@@ -650,7 +650,7 @@ impl App {
                         }
                         _ => {
                             vec![
-                                format!("📄 Binary: {}", selected_file.name),
+                                format!("Binary: {}", selected_file.name),
                                 format!("Size: {:.1} KB", selected_file.size as f64 / 1024.0),
                                 "".to_string(),
                                 "Binary file - cannot preview".to_string(),
