@@ -2,6 +2,7 @@ use crate::file_system::{FileExplorer, FileInfo};
 use crate::search::{SearchEngine, SearchResult};
 use crate::file_sharing::FileShareServer;
 use crate::config::Config;
+use arboard::Clipboard;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -486,6 +487,39 @@ impl App {
         }
     }
 
+    pub fn copy_selected_file_path(&self) -> Result<String, String> {
+        let file_info = if self.showing_search_results {
+            if let Some(selected) = self.search_list_state.selected() {
+                if selected < self.search_results.len() {
+                    &self.search_results[selected].file_info
+                } else {
+                    return Err("No file selected".to_string());
+                }
+            } else {
+                return Err("No file selected".to_string());
+            }
+        } else {
+            if let Some(selected) = self.list_state.selected() {
+                let files = self.explorer.files();
+                if selected < files.len() {
+                    &files[selected]
+                } else {
+                    return Err("No file selected".to_string());
+                }
+            } else {
+                return Err("No file selected".to_string());
+            }
+        };
+
+        let path_str = file_info.path.to_string_lossy().to_string();
+        
+        // Copy to system clipboard
+        match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(&path_str)) {
+            Ok(_) => Ok(format!("Copied path to clipboard: {}", path_str)),
+            Err(e) => Err(format!("Failed to copy path to clipboard: {}", e)),
+        }
+    }
+
     fn copy_file_operation(&self, source: &PathBuf, destination: &PathBuf) -> Result<(), std::io::Error> {
         if source.is_dir() {
             self.copy_directory_recursive(source, destination)
@@ -793,6 +827,11 @@ async fn run_app<B: Backend>(
                                 Ok(msg) => app.set_info_message(msg),
                                 Err(err) => app.set_error_message(err),
                             }
+                        } else if key_bindings.matches_key(&key_bindings.actions.copy_path, &key.code) {
+                            match app.copy_selected_file_path() {
+                                Ok(msg) => app.set_info_message(msg),
+                                Err(err) => app.set_error_message(err),
+                            }
                         } else if key_bindings.matches_key(&key_bindings.search_results.back, &key.code) {
                             app.clear_search_results();
                         } else if key_bindings.matches_key(&key_bindings.search_mode.toggle_strategy, &key.code) {
@@ -848,6 +887,11 @@ async fn run_app<B: Backend>(
                             }
                         } else if key_bindings.matches_key(&key_bindings.actions.paste, &key.code) {
                             match app.paste_file() {
+                                Ok(msg) => app.set_info_message(msg),
+                                Err(err) => app.set_error_message(err),
+                            }
+                        } else if key_bindings.matches_key(&key_bindings.actions.copy_path, &key.code) {
+                            match app.copy_selected_file_path() {
                                 Ok(msg) => app.set_info_message(msg),
                                 Err(err) => app.set_error_message(err),
                             }
@@ -1060,7 +1104,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         };
         
         format!(
-            "{}: Quit | {}: New search | {}: Back | {}: Navigate | {}: Open/Navigate | {}: Open | {}: Reveal | {}: Share | {}: Cut | {}: Copy{}",
+            "{}: Quit | {}: New search | {}: Back | {}: Navigate | {}: Open/Navigate | {}: Open | {}: Reveal | {}: Share | {}: Cut | {}: Copy | {}: Copy path{}",
             kb.get_key_display(&kb.actions.quit),
             kb.get_key_display(&kb.actions.search),
             kb.get_key_display(&kb.search_results.back),
@@ -1071,6 +1115,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
             kb.get_key_display(&kb.actions.share),
             kb.get_key_display(&kb.actions.cut),
             kb.get_key_display(&kb.actions.copy),
+            kb.get_key_display(&kb.actions.copy_path),
             clipboard_status
         )
     } else {
@@ -1091,7 +1136,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         };
         
         format!(
-            "{}: Quit | {}: Search | {}: Navigate | {}: Open/Navigate | {}: Go up | {}: Open | {}: Reveal | {}: Share | {}: Cut | {}: Copy{}",
+            "{}: Quit | {}: Search | {}: Navigate | {}: Open/Navigate | {}: Go up | {}: Open | {}: Reveal | {}: Share | {}: Cut | {}: Copy | {}: Copy path{}",
             kb.get_key_display(&kb.actions.quit),
             kb.get_key_display(&kb.actions.search),
             kb.get_key_display(&kb.navigation.up),
@@ -1102,6 +1147,7 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
             kb.get_key_display(&kb.actions.share),
             kb.get_key_display(&kb.actions.cut),
             kb.get_key_display(&kb.actions.copy),
+            kb.get_key_display(&kb.actions.copy_path),
             clipboard_status
         )
     };
